@@ -1,0 +1,5 @@
+{
+  "name": "TRPG Investigation Tool",
+  "description": "A web-based tool for creating and playing TRPG investigation scenarios with map building, probability-based object interaction, and log generation.",
+  "requestFramePermissions": []
+}
