@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { GameData, MapScene, MapObject, ObjectType } from '../../types';
 import { DEFAULT_PROBABILITY } from '../../lib/constants';
-import { generateId } from '../../lib/utils';
+import { generateId, blobToBase64 } from '../../lib/utils';
 import { EditorSidebar } from './EditorSidebar';
 import { EditorToolbar } from './EditorToolbar';
 import { EditorCanvas } from './EditorCanvas';
@@ -84,10 +84,11 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
     updateCurrentMap(m => ({ ...m, ...updates }));
   };
   
-  const handleBackgroundUpload = (file: File) => {
+  const handleBackgroundUpload = async (file: File) => {
     if (currentMap) {
-        const url = URL.createObjectURL(file);
-        handleUpdateMapProperties({ bgImage: url });
+        // Change: Convert to Base64 instead of ObjectURL
+        const base64 = await blobToBase64(file);
+        handleUpdateMapProperties({ bgImage: base64 });
     }
   };
 

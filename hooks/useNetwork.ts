@@ -24,9 +24,9 @@ export const useNetwork = (): UseNetworkReturn => {
   const [peerId, setPeerId] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [hostConnection, setHostConnection] = useState<any>(null);
+  const [connections, setConnections] = useState<any[]>([]); // State로 변경하여 리렌더링 유발
   
   const peerRef = useRef<any>(null);
-  const connectionsRef = useRef<any[]>([]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -45,7 +45,7 @@ export const useNetwork = (): UseNetworkReturn => {
     setNetworkMode('SOLO');
     setPeerId(null);
     setHostConnection(null);
-    connectionsRef.current = [];
+    setConnections([]);
   }, []);
 
   const startHost = useCallback(() => {
@@ -61,21 +61,19 @@ export const useNetwork = (): UseNetworkReturn => {
 
     newPeer.on('connection', (conn: any) => {
         console.log('[Network] Client connected:', conn.peer);
-        connectionsRef.current.push(conn);
         
         conn.on('open', () => {
              conn.send({ type: 'WELCOME', msg: 'Connected to Host' });
+             setConnections(prev => [...prev, conn]); // 연결 성공 시 상태 업데이트
         });
 
-        // Data processing is handled by the consumer of this hook via event delegation
-        // but for simplicity in this architecture, we might need a way to pass data up.
-        // *Correction*: We will attach data listeners in the Player component or expose a listener setter.
-        // However, standard PeerJS pattern is to attach 'on data' inside the connection event.
-        // To keep this hook generic, we'll let the component access connectionsRef or manage data flow there.
-        // *Refined*: For this app, Player.tsx sets up the listeners on `connections`.
-        
         conn.on('close', () => {
-            connectionsRef.current = connectionsRef.current.filter(c => c !== conn);
+            setConnections(prev => prev.filter(c => c !== conn));
+        });
+        
+        conn.on('error', (err: any) => {
+            console.error('Connection error:', err);
+            setConnections(prev => prev.filter(c => c !== conn));
         });
     });
 
@@ -123,12 +121,13 @@ export const useNetwork = (): UseNetworkReturn => {
   }, [disconnect]);
 
   const broadcast = useCallback((data: NetworkAction) => {
-    connectionsRef.current.forEach(conn => {
+    // State인 connections를 사용
+    connections.forEach(conn => {
         if (conn.open) {
             conn.send(data);
         }
     });
-  }, []);
+  }, [connections]);
 
   const sendToHost = useCallback((data: NetworkAction) => {
     if (hostConnection && hostConnection.open) {
@@ -142,7 +141,7 @@ export const useNetwork = (): UseNetworkReturn => {
     peerId,
     isConnecting,
     hostConnection,
-    connections: connectionsRef.current, // Expose ref current array (note: this might not trigger re-renders on change, which is handled by side effects)
+    connections, 
     startHost,
     joinGame,
     disconnect,

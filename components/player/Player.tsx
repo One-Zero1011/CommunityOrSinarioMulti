@@ -83,6 +83,9 @@ export const Player: React.FC<PlayerProps> = ({
   // Host: Broadcast state changes
   useEffect(() => {
     if (networkMode === 'HOST') {
+        // 새로운 클라이언트가 접속하면(connections 변경 시), 게임 데이터 전체를 다시 뿌려줍니다.
+        broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
+        
         broadcast({
             type: 'SYNC_STATE',
             payload: {
@@ -93,7 +96,7 @@ export const Player: React.FC<PlayerProps> = ({
             }
         });
     }
-  }, [currentMapId, characters, interactionResult, chatMessages, networkMode, broadcast]);
+  }, [currentMapId, characters, interactionResult, chatMessages, networkMode, broadcast, connections.length]); // connections.length 추가
 
   // Client & Host: Handle Incoming Data
   useEffect(() => {
@@ -140,8 +143,10 @@ export const Player: React.FC<PlayerProps> = ({
                 setCharacters(sChars);
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
+                // 첫 데이터 로드 완료 처리
                 setIsDataLoaded(true);
             } else if (data.type === 'SYNC_GAMEDATA') {
+                console.log("Received Game Data Sync");
                 setGameData(data.payload);
                 setIsDataLoaded(true);
             }
@@ -154,8 +159,6 @@ export const Player: React.FC<PlayerProps> = ({
             conn.off('data'); // Remove old listeners to prevent duplication
             conn.on('data', handleAction);
         });
-        // Also broadcast initial game data when a client connects (this logic could be improved but works for now)
-        broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
     } else if (networkMode === 'CLIENT' && hostConnection) {
         hostConnection.off('data');
         hostConnection.on('data', handleAction);

@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 // @ts-ignore
 import * as XLSX from 'xlsx';
 import { GameData, MapScene, MapObject } from '../types';
+import { blobToBase64 } from './utils';
 
 export const exportGameDataToZip = async (data: GameData) => {
   const zip = new JSZip();
@@ -195,7 +196,8 @@ export const loadGameDataFromFile = async (file: File): Promise<GameData> => {
              const imageFile = zip.file(map.bgImage);
              if (imageFile) {
                  const blob = await imageFile.async("blob");
-                 newMap.bgImage = URL.createObjectURL(blob);
+                 // Change: Convert restored blob to Base64
+                 newMap.bgImage = await blobToBase64(blob);
              }
          }
 
@@ -206,7 +208,8 @@ export const loadGameDataFromFile = async (file: File): Promise<GameData> => {
                  const imageFile = zip.file(obj.image);
                  if (imageFile) {
                     const blob = await imageFile.async("blob");
-                    newObj.image = URL.createObjectURL(blob);
+                    // Change: Convert restored blob to Base64
+                    newObj.image = await blobToBase64(blob);
                  }
              }
              return newObj;

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapScene, MapObject, ShapeType, ResultType } from '../../types';
 import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X } from 'lucide-react';
+import { blobToBase64 } from '../../lib/utils';
 
 interface ObjectInspectorProps {
   mapList: MapScene[];
@@ -147,17 +148,19 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0] && currentMap) {
-        const url = URL.createObjectURL(e.target.files[0]);
-        onUpdateMap({ bgImage: url });
+        // Change: Convert to Base64
+        const base64 = await blobToBase64(e.target.files[0]);
+        onUpdateMap({ bgImage: base64 });
     }
   };
 
-  const handleObjectImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleObjectImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0] && selectedObject) {
-        const url = URL.createObjectURL(e.target.files[0]);
-        onUpdateObject(selectedObject.id, { image: url });
+        // Change: Convert to Base64
+        const base64 = await blobToBase64(e.target.files[0]);
+        onUpdateObject(selectedObject.id, { image: base64 });
     }
   };
 
