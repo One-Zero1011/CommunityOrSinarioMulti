@@ -7,6 +7,7 @@ import { EditorSidebar } from './EditorSidebar';
 import { EditorToolbar } from './EditorToolbar';
 import { EditorCanvas } from './EditorCanvas';
 import { ObjectInspector } from './ObjectInspector';
+import { ImageCropperModal, CropShape } from '../common/ImageCropperModal';
 
 interface EditorProps {
   initialData: GameData;
@@ -14,10 +15,25 @@ interface EditorProps {
   onBack: () => void;
 }
 
+interface CropState {
+  isOpen: boolean;
+  file: File | null;
+  initialAspectRatio?: number | null;
+  initialShape?: CropShape;
+  onConfirm: (base64: string) => void;
+}
+
 export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) => {
   const [data, setData] = useState<GameData>(initialData);
   const [currentMapId, setCurrentMapId] = useState<string>(initialData.maps[0]?.id || '');
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  
+  // Crop Modal State
+  const [cropState, setCropState] = useState<CropState>({
+    isOpen: false,
+    file: null,
+    onConfirm: () => {},
+  });
   
   const currentMap = data.maps.find(m => m.id === currentMapId);
   const selectedObject = currentMap?.objects.find(o => o.id === selectedObjectId);
@@ -84,11 +100,18 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
     updateCurrentMap(m => ({ ...m, ...updates }));
   };
   
-  const handleBackgroundUpload = async (file: File) => {
+  // Modified to use Cropper
+  const handleBackgroundUpload = (file: File) => {
     if (currentMap) {
-        // Change: Convert to Base64 instead of ObjectURL
-        const base64 = await blobToBase64(file);
-        handleUpdateMapProperties({ bgImage: base64 });
+      setCropState({
+        isOpen: true,
+        file,
+        initialAspectRatio: null, // Backgrounds usually free form
+        initialShape: 'RECTANGLE',
+        onConfirm: (base64) => {
+          handleUpdateMapProperties({ bgImage: base64 });
+        }
+      });
     }
   };
 
@@ -133,6 +156,16 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
         onUpdateMap={handleUpdateMapProperties}
         onUpdateObject={handleUpdateObject}
         onDeleteObject={handleDeleteObject}
+      />
+
+      {/* Image Cropper Modal */}
+      <ImageCropperModal 
+        isOpen={cropState.isOpen}
+        file={cropState.file}
+        initialAspectRatio={cropState.initialAspectRatio}
+        initialShape={cropState.initialShape}
+        onClose={() => setCropState(prev => ({ ...prev, isOpen: false, file: null }))}
+        onConfirm={cropState.onConfirm}
       />
     </div>
   );

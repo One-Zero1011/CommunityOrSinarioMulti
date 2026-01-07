@@ -2,12 +2,15 @@
 import { useState, useEffect } from 'react';
 import { GameData } from '../types';
 
-export const useAutoSave = (data: GameData) => {
+export const useAutoSave = (data: GameData, interval: number = 10000) => {
   const [hasAutosave, setHasAutosave] = useState(false);
   const [lastAutoSaveTime, setLastAutoSaveTime] = useState<string | null>(null);
 
   // Auto-save Effect
   useEffect(() => {
+    // interval이 0이면 자동 저장 비활성화
+    if (interval <= 0) return;
+
     const autoSaveTimer = setTimeout(() => {
       try {
         localStorage.setItem('TRPG_EDITOR_AUTOSAVE', JSON.stringify(data));
@@ -15,10 +18,10 @@ export const useAutoSave = (data: GameData) => {
       } catch (e) {
         console.error("Auto-save failed", e);
       }
-    }, 1000); 
+    }, interval); 
 
     return () => clearTimeout(autoSaveTimer);
-  }, [data]);
+  }, [data, interval]);
 
   // Check existence
   useEffect(() => {
@@ -32,8 +35,8 @@ export const useAutoSave = (data: GameData) => {
     };
     
     checkAutosave();
-    const interval = setInterval(checkAutosave, 2000);
-    return () => clearInterval(interval);
+    const intervalId = setInterval(checkAutosave, 2000);
+    return () => clearInterval(intervalId);
   }, []);
 
   const loadAutosave = (): GameData | null => {
