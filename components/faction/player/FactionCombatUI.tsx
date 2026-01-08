@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
-import { FactionPlayerProfile, CombatState } from '../../../types';
-import { Sword, Heart, Shield, AlertTriangle, ArrowRight, XCircle, Wind } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { FactionPlayerProfile, CombatState, FactionChatMessage } from '../../../types';
+import { Sword, Heart, Shield, AlertTriangle, ArrowRight, XCircle, Wind, MessageSquare, Send, MapPin } from 'lucide-react';
 
 interface FactionCombatUIProps {
     myProfile: FactionPlayerProfile | null;
@@ -9,24 +9,62 @@ interface FactionCombatUIProps {
     combatState: CombatState;
     // Handlers
     onAction: (type: 'ATTACK' | 'HEAL' | 'FLEE', targetId: string) => void;
-    onResponse: (type: 'DEFEND' | 'COUNTER' | 'COVER' | 'HEAL' | 'FLEE', targetId?: string) => void; 
-    // `targetId` in response usually implies who I heal, or redundant if self-focused. 
-    // For Heal Response, we might need a target.
+    onResponse: (type: 'DEFEND' | 'COUNTER' | 'COVER' | 'HEAL' | 'FLEE', targetId?: string) => void;
+    
+    // Chat Props
+    chatMessages: FactionChatMessage[];
+    onSendMessage: (text: string, channel: 'TEAM' | 'BLOCK') => void;
 }
 
 export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({ 
-    myProfile, players, combatState, onAction, onResponse
+    myProfile, players, combatState, onAction, onResponse, chatMessages, onSendMessage
 }) => {
     const [actionStep, setActionStep] = useState<'SELECT_ACTION' | 'SELECT_TARGET'>('SELECT_ACTION');
     const [selectedActionType, setSelectedActionType] = useState<'ATTACK' | 'HEAL' | null>(null);
     const [healTargetStep, setHealTargetStep] = useState(false); // For Heal Response
+
+    // Chat State
+    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [chatChannel, setChatChannel] = useState<'TEAM' | 'BLOCK'>('TEAM');
+    const [chatInput, setChatInput] = useState("");
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const prevMsgCountRef = useRef(chatMessages.length);
+    const [hasNewMsg, setHasNewMsg] = useState(false);
 
     const isMyTurn = myProfile && combatState.currentTurnPlayerId === myProfile.id;
     const activePlayer = players.find(p => p.id === combatState.currentTurnPlayerId);
     
     // -- Filtering --
     const enemies = myProfile ? players.filter(p => p.factionId !== myProfile.factionId && p.hp > 0) : [];
-    const allies = myProfile ? players.filter(p => p.factionId === myProfile.factionId && p.hp > 0) : []; // Includes self
+    
+    // Healing Logic Update: Same Faction AND Same Team (includes self)
+    const allies = myProfile ? players.filter(p => p.factionId === myProfile.factionId && p.teamId === myProfile.teamId && p.hp > 0) : [];
+
+    // -- Chat Logic --
+    useEffect(() => {
+        if (isChatOpen) {
+            chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            setHasNewMsg(false);
+        } else if (chatMessages.length > prevMsgCountRef.current) {
+            setHasNewMsg(true);
+        }
+        prevMsgCountRef.current = chatMessages.length;
+    }, [chatMessages, isChatOpen, chatChannel]);
+
+    const handleSendChat = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (chatInput.trim()) {
+            onSendMessage(chatInput, chatChannel);
+            setChatInput("");
+        }
+    };
+
+    const filteredMessages = chatMessages.filter(msg => {
+        if (msg.channel !== chatChannel) return false;
+        if (msg.channel === 'TEAM') return msg.targetId === myProfile?.teamId;
+        if (msg.channel === 'BLOCK') return msg.targetId === myProfile?.currentBlockId;
+        return false;
+    });
 
     // -- Action Phase Logic --
     const handleActionClick = (action: 'ATTACK' | 'HEAL') => {
@@ -53,7 +91,8 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     const target = pending ? players.find(p => p.id === pending.targetId) : null;
     
     const isTargetMe = myProfile && target && myProfile.id === target.id;
-    const canCover = myProfile && target && myProfile.factionId === target.factionId && myProfile.id !== target.id;
+    // Cover Logic: Can cover only if same Faction AND same Team (Updated consistency)
+    const canCover = myProfile && target && myProfile.factionId === target.factionId && myProfile.teamId === target.teamId && myProfile.id !== target.id;
 
     const handleHealResponseClick = () => {
         setHealTargetStep(true);
@@ -119,7 +158,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                                     </div>
                                     <div className="text-xl font-bold text-white">치유</div>
                                     <div className="text-xs text-gray-400 text-center">
-                                        SPI 기반 회복
+                                        SPI 기반 회복 (같은 팀만)
                                     </div>
                                 </button>
 
@@ -144,7 +183,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                                 <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#444]">
                                     <h3 className="text-xl font-bold text-white flex items-center gap-2">
                                         {selectedActionType === 'ATTACK' ? <Sword className="text-red-500"/> : <Heart className="text-green-500"/>}
-                                        대상 선택 ({selectedActionType === 'ATTACK' ? '적군' : '아군'})
+                                        대상 선택 ({selectedActionType === 'ATTACK' ? '적군' : '같은 팀 아군'})
                                     </h3>
                                     <button onClick={() => setActionStep('SELECT_ACTION')} className="text-gray-500 hover:text-white"><XCircle /></button>
                                 </div>
@@ -182,7 +221,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                              <div className="w-full bg-[#1e1e1e] border border-[#444] rounded-xl p-6 shadow-2xl animate-fade-in-up">
                                 <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#444]">
                                     <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                                        <Heart className="text-green-500"/> 치유 대상 선택 (대응 행동)
+                                        <Heart className="text-green-500"/> 치유 대상 선택 (대응 행동 - 같은 팀)
                                     </h3>
                                     <button onClick={() => setHealTargetStep(false)} className="text-gray-500 hover:text-white"><XCircle /></button>
                                 </div>
@@ -203,6 +242,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                                             <ArrowRight size={16} className="text-gray-500" />
                                         </button>
                                     ))}
+                                    {allies.length === 0 && <div className="col-span-3 text-center text-gray-500">치유할 수 있는 팀원이 없습니다.</div>}
                                 </div>
                              </div>
                         ) : (
@@ -283,8 +323,8 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                  )}
              </div>
 
-             {/* Log Area */}
-             <div className="absolute bottom-0 w-full max-w-3xl h-48 bg-gradient-to-t from-black to-transparent p-4 pointer-events-none">
+             {/* Log Area - Shifted up slightly to accommodate chat */}
+             <div className="absolute bottom-16 w-full max-w-3xl h-36 bg-gradient-to-t from-black via-black/80 to-transparent p-4 pointer-events-none">
                  <div className="w-full h-full overflow-y-auto flex flex-col-reverse gap-1 mask-image-gradient">
                      {[...combatState.logs].reverse().map(log => (
                          <div key={log.id} className={`text-sm px-2 py-1 rounded backdrop-blur-sm ${log.type === 'ATTACK' ? 'text-red-300 bg-red-900/20' : log.type === 'HEAL' ? 'text-green-300 bg-green-900/20' : log.type === 'DEFEND' ? 'text-blue-300 bg-blue-900/20' : log.type === 'FLEE' ? 'text-gray-200 bg-gray-600/50' : 'text-gray-400 bg-black/40'}`}>
@@ -294,6 +334,64 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                      ))}
                  </div>
              </div>
+
+             {/* Combat Chat Toggle */}
+             <div className="absolute bottom-4 right-4 z-50">
+                 <button 
+                    onClick={() => setIsChatOpen(!isChatOpen)}
+                    className="bg-[#2a2a2a] hover:bg-[#383838] text-white p-3 rounded-full shadow-lg border border-[#444] relative"
+                 >
+                     <MessageSquare size={24} />
+                     {hasNewMsg && !isChatOpen && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border border-black"></span>}
+                 </button>
+             </div>
+
+             {/* Chat Box */}
+             {isChatOpen && (
+                 <div className="absolute bottom-20 right-4 w-80 h-96 bg-[#1a1a1a]/95 border border-[#444] rounded-lg shadow-2xl flex flex-col overflow-hidden z-50 animate-fade-in-up">
+                     <div className="flex border-b border-[#444]">
+                        <button 
+                            onClick={() => setChatChannel('TEAM')}
+                            className={`flex-1 py-2 text-xs font-bold ${chatChannel === 'TEAM' ? 'bg-[#2a2a2a] text-blue-400 border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-300'}`}
+                        >
+                            팀 채팅
+                        </button>
+                        <button 
+                            onClick={() => setChatChannel('BLOCK')}
+                            className={`flex-1 py-2 text-xs font-bold ${chatChannel === 'BLOCK' ? 'bg-[#2a2a2a] text-red-400 border-b-2 border-red-500' : 'text-gray-500 hover:text-gray-300'}`}
+                        >
+                            지역 채팅
+                        </button>
+                        <button onClick={() => setIsChatOpen(false)} className="px-3 hover:text-white text-gray-500"><XCircle size={16}/></button>
+                     </div>
+                     <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-black/20">
+                        {filteredMessages.length === 0 && <div className="text-center text-gray-500 text-xs mt-4">메시지가 없습니다.</div>}
+                        {filteredMessages.map(msg => (
+                            <div key={msg.id} className={`flex flex-col ${msg.senderId === myProfile?.id ? 'items-end' : 'items-start'}`}>
+                                <span className="text-[10px] text-gray-400 px-1">{msg.senderName}</span>
+                                <div className={`px-2 py-1.5 rounded text-xs max-w-[90%] break-words ${msg.senderId === myProfile?.id ? (msg.channel === 'TEAM' ? 'bg-blue-900/50 text-blue-100 border border-blue-500/30' : 'bg-red-900/50 text-red-100 border border-red-500/30') : 'bg-[#333] text-gray-200 border border-[#444]'}`}>
+                                    {msg.text}
+                                </div>
+                            </div>
+                        ))}
+                        <div ref={chatEndRef}></div>
+                     </div>
+                     <form onSubmit={handleSendChat} className="p-2 border-t border-[#444] bg-[#222]">
+                        <div className="relative">
+                            <input 
+                                type="text" 
+                                value={chatInput}
+                                onChange={(e) => setChatInput(e.target.value)}
+                                className="w-full bg-[#111] border border-[#333] rounded px-3 py-1.5 text-xs text-white focus:border-indigo-500 outline-none pr-8"
+                                placeholder="메시지 전송..."
+                            />
+                            <button type="submit" className="absolute right-1 top-1 text-gray-400 hover:text-white p-0.5">
+                                <Send size={14} />
+                            </button>
+                        </div>
+                     </form>
+                 </div>
+             )}
         </div>
     );
 };

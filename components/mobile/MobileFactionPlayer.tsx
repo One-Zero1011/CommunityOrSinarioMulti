@@ -68,6 +68,14 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   // Turn Status
   const isTurnFinished = myProfile && myProfile.lastActionTurn === data.currentTurn;
 
+  // -- Derived Combat Visibility --
+  const activeCombatPlayer = players.find(p => p.id === combatState.currentTurnPlayerId);
+  const combatBlockId = activeCombatPlayer?.currentBlockId;
+  const isProfileInCombat = myProfile && combatBlockId && myProfile.currentBlockId === combatBlockId;
+  
+  // Only show combat UI if combat is active AND I am in the same block (or I am admin observing)
+  const showCombatUI = combatState.isActive && (isAdmin || isProfileInCombat);
+
   // -- Network Logic --
 
   useEffect(() => {
@@ -108,6 +116,10 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                      broadcast({ type: 'SYNC_FACTION_CHAT', messages: newChat });
                      return newChat;
                  });
+            } else if (msg.type === 'SYNC_COMBAT_STATE') {
+                // Client requesting combat state update
+                setCombatState(msg.state);
+                broadcast({ type: 'SYNC_COMBAT_STATE', state: msg.state });
             }
         } else if (networkMode === 'CLIENT') {
             if (msg.type === 'SYNC_FACTION_GAMEDATA') {
@@ -333,7 +345,12 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   
   const syncCombatState = (newState: CombatState) => {
       setCombatState(newState);
-      if (networkMode === 'HOST') broadcast({ type: 'SYNC_COMBAT_STATE', state: newState });
+      if (networkMode === 'HOST') {
+          broadcast({ type: 'SYNC_COMBAT_STATE', state: newState });
+      } else {
+          // If I am a client, I must tell the Host to update the state
+          sendToHost({ type: 'SYNC_COMBAT_STATE', state: newState });
+      }
   };
 
   const endCombat = (winnerFactionId: string | null, loserFactionId: string | null, reason: string) => {
@@ -595,13 +612,15 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
             </Modal>
         )}
 
-        {combatState.isActive && (
+        {showCombatUI && (
             <FactionCombatUI 
                 myProfile={myProfile}
                 players={players}
                 combatState={combatState}
                 onAction={handleCombatAction}
                 onResponse={handleCombatResponse}
+                chatMessages={chatMessages}
+                onSendMessage={handleSendMessage}
             />
         )}
 

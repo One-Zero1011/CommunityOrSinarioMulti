@@ -64,6 +64,14 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   // Turn Status
   const isTurnFinished = myProfile && myProfile.lastActionTurn === data.currentTurn;
 
+  // -- Derived Combat Visibility --
+  const activeCombatPlayer = players.find(p => p.id === combatState.currentTurnPlayerId);
+  const combatBlockId = activeCombatPlayer?.currentBlockId;
+  const isProfileInCombat = myProfile && combatBlockId && myProfile.currentBlockId === combatBlockId;
+  
+  // Only show combat UI if combat is active AND I am in the same block (or I am admin observing - optional, but sticking to player view for now)
+  const showCombatUI = combatState.isActive && (isAdmin || isProfileInCombat);
+
   // -- Network Logic --
 
   useEffect(() => {
@@ -74,6 +82,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
     if (networkMode === 'HOST') {
         const interval = setInterval(() => {
             broadcast({ type: 'SYNC_FACTION_GAMEDATA', payload: data });
+            // Combat state is sync-critical, usually sent on change, but heartbeat ensures consistency
             if (combatState.isActive) {
                 broadcast({ type: 'SYNC_COMBAT_STATE', state: combatState });
             }
@@ -104,6 +113,10 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
                      broadcast({ type: 'SYNC_FACTION_CHAT', messages: newChat });
                      return newChat;
                  });
+            } else if (msg.type === 'SYNC_COMBAT_STATE') {
+                // Client requesting combat state update (e.g. Attacking)
+                setCombatState(msg.state);
+                broadcast({ type: 'SYNC_COMBAT_STATE', state: msg.state });
             }
         } else if (networkMode === 'CLIENT') {
             if (msg.type === 'SYNC_FACTION_GAMEDATA') {
@@ -338,7 +351,12 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   
   const syncCombatState = (newState: CombatState) => {
       setCombatState(newState);
-      if (networkMode === 'HOST') broadcast({ type: 'SYNC_COMBAT_STATE', state: newState });
+      if (networkMode === 'HOST') {
+          broadcast({ type: 'SYNC_COMBAT_STATE', state: newState });
+      } else {
+          // If I am a client, I must tell the Host to update the state
+          sendToHost({ type: 'SYNC_COMBAT_STATE', state: newState });
+      }
   };
 
   const endCombat = (winnerFactionId: string | null, loserFactionId: string | null, reason: string) => {
@@ -600,13 +618,15 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
             </Modal>
         )}
 
-        {combatState.isActive && (
+        {showCombatUI && (
             <FactionCombatUI 
                 myProfile={myProfile}
                 players={players}
                 combatState={combatState}
                 onAction={handleCombatAction}
                 onResponse={handleCombatResponse}
+                chatMessages={chatMessages}
+                onSendMessage={handleSendMessage}
             />
         )}
 
