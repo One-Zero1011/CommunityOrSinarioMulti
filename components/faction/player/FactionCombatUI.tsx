@@ -246,7 +246,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                                             >
                                                 <Wind size={32} className="text-white" />
                                                 <span className="font-bold text-white">도주</span>
-                                                <span className="text-[10px] text-gray-400">0 데미지 시도<br/>(판정> {20 - (Math.min(5, Math.max(1, combatState.turnCount)) * 2)})</span>
+                                                <span className="text-[10px] text-gray-400">0 데미지 시도<br/>(판정&gt; {20 - (Math.min(5, Math.max(1, combatState.turnCount)) * 2)})</span>
                                             </button>
                                         </>
                                     )}
