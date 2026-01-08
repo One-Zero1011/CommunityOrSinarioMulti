@@ -1,6 +1,11 @@
 
 
 
+
+
+
+
+
 export type ResultType = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'CRITICAL_FAILURE';
 
 export type ObjectType = 'MAP_LINK' | 'OBJECT' | 'DECORATION';
@@ -143,12 +148,14 @@ export interface PendingCombatAction {
 export interface CombatState {
   isActive: boolean;
   currentTurnPlayerId: string | null;
+  combatBlockId?: string; // Add Block ID to anchor combat to a location
   turnCount: number; // Track turns for Flee mechanics
   phase: CombatPhase;
   pendingAction: PendingCombatAction | null;
   logs: CombatLogEntry[];
   factionDamage: Record<string, number>; // factionId -> total damage taken
   fledPlayerIds: string[]; // List of players who fled
+  turnOrder: string[]; // Strict turn order based on Initiative
 }
 
 // --------------------------

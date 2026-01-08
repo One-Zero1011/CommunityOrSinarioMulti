@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { ArrowLeft, Wifi, Check, Copy, Unlock, User } from 'lucide-react';
+import { ArrowLeft, Wifi, Check, Copy, Unlock, User, Sword } from 'lucide-react';
 import { FactionPlayerProfile, FactionMap } from '../../../types';
 
 interface FactionHUDProps {
@@ -16,10 +16,15 @@ interface FactionHUDProps {
     onExit: () => void;
     mapList: FactionMap[];
     onChangeMap: (id: string) => void;
+    
+    // Combat Watch
+    combatActive?: boolean;
+    onWatchCombat?: () => void;
 }
 
 export const FactionHUD: React.FC<FactionHUDProps> = ({ 
-    title, currentMap, currentTurn, networkMode, peerId, copiedId, setCopiedId, isAdmin, myProfile, onExit, mapList, onChangeMap
+    title, currentMap, currentTurn, networkMode, peerId, copiedId, setCopiedId, isAdmin, myProfile, onExit, mapList, onChangeMap,
+    combatActive, onWatchCombat
 }) => {
     return (
         <div className="h-14 bg-[#252525] border-b border-[#444] flex items-center justify-between px-3 md:px-6 shrink-0 z-20 shadow-md">
@@ -57,6 +62,19 @@ export const FactionHUD: React.FC<FactionHUDProps> = ({
 
              {/* Right Section */}
              <div className="flex items-center gap-2 md:gap-4 shrink-0 ml-2">
+                
+                {/* Admin Watch Combat Button */}
+                {isAdmin && combatActive && onWatchCombat && (
+                    <button 
+                        onClick={onWatchCombat}
+                        className="flex items-center gap-1 bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/50 px-3 py-1.5 rounded-lg text-xs font-bold animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.3)] transition-all"
+                    >
+                        <Sword size={14} className="animate-bounce" /> 
+                        <span className="hidden md:inline">전투 관전하기</span>
+                        <span className="md:hidden">전투 중</span>
+                    </button>
+                )}
+
                 {networkMode !== 'SOLO' && (
                     <div className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold ${networkMode === 'HOST' ? 'bg-orange-900/30 border-orange-500/30 text-orange-200' : 'bg-blue-900/30 border-blue-500/30 text-blue-200'}`}>
                         <Wifi size={14} />
