@@ -1,5 +1,6 @@
 
 
+
 export type ResultType = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'CRITICAL_FAILURE';
 
 export type ObjectType = 'MAP_LINK' | 'OBJECT' | 'DECORATION';
@@ -96,6 +97,7 @@ export interface FactionGameData {
   maps: FactionMap[];
   factions: Faction[];
   adminKey?: string;
+  currentTurn?: number;
 }
 
 export interface FactionStats {
@@ -117,6 +119,7 @@ export interface FactionPlayerProfile {
   maxHp: number;   // Calculated Max HP
   inventory: string[];
   currentBlockId?: string; // Current location on the FactionMap
+  lastActionTurn?: number; // The turn number when the last move occurred
 }
 
 // Combat Types
@@ -205,6 +208,7 @@ export interface SyncStatePayload {
 export type NetworkAction = 
   | { type: 'SYNC_STATE'; payload: SyncStatePayload }
   | { type: 'SYNC_GAMEDATA'; payload: GameData }
+  | { type: 'SYNC_FACTION_GAMEDATA'; payload: FactionGameData }
   | { type: 'WELCOME'; msg: string }
   | { type: 'REQUEST_ACTION'; action: 'CLICK_OBJECT'; objectId: string }
   | { type: 'REQUEST_ACTION'; action: 'MOVE_MAP'; targetMapId: string }
@@ -222,4 +226,5 @@ export type NetworkAction =
   | { type: 'SYNC_COMBAT_STATE'; state: CombatState }
   | { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] }
   | { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage }
-  | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] };
+  | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] }
+  | { type: 'ADMIN_ANNOUNCEMENT'; targetId: string | null; title: string; message: string };

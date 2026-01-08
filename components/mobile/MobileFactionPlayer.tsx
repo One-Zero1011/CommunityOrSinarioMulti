@@ -2,26 +2,26 @@
 import React, { useState, useEffect } from 'react';
 import { FactionGameData, FactionPlayerProfile, CombatState, FactionMap, FactionChatMessage } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
-import { FactionSetupModal } from './player/FactionSetupModal';
-import { FactionHUD } from './player/FactionHUD';
-import { FactionSidebar } from './player/FactionSidebar';
-import { FactionChatSidebar } from './player/FactionChatSidebar';
-import { FactionMapCanvas } from './player/FactionMapCanvas';
-import { FactionAdminPanel } from './player/FactionAdminPanel';
-import { FactionCombatUI } from './player/FactionCombatUI';
+import { FactionSetupModal } from '../faction/player/FactionSetupModal';
+import { FactionHUD } from '../faction/player/FactionHUD';
+import { FactionSidebar } from '../faction/player/FactionSidebar';
+import { FactionChatSidebar } from '../faction/player/FactionChatSidebar';
+import { FactionMapCanvas } from '../faction/player/FactionMapCanvas';
+import { FactionAdminPanel } from '../faction/player/FactionAdminPanel';
+import { FactionCombatUI } from '../faction/player/FactionCombatUI';
 import { rollFactionAttack, rollFactionHeal, rollFactionDefend, rollFactionFlee } from '../../lib/game-logic';
 import { generateId } from '../../lib/utils';
-import { Lock, Hourglass, Megaphone } from 'lucide-react';
+import { Lock, Hourglass, Megaphone, Menu, MessageSquare } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 
-interface FactionPlayerProps {
+interface MobileFactionPlayerProps {
   data: FactionGameData;
   network: ReturnType<typeof useNetwork>;
   onExit: () => void;
 }
 
-export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData, network, onExit }) => {
+export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: initialData, network, onExit }) => {
   const { networkMode, peerId, startHost, connections, hostConnection, broadcast, sendToHost } = network;
   
   const [data, setData] = useState<FactionGameData>({
@@ -51,9 +51,13 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   const [copiedId, setCopiedId] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(networkMode !== 'CLIENT');
 
-  // Admin UI State
+  // UI State
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [isSetupOpen, setIsSetupOpen] = useState(true);
+  
+  // Mobile Specific UI State
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
 
   // Announcement State
   const [announcement, setAnnouncement] = useState<{title: string, message: string} | null>(null);
@@ -207,12 +211,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   };
 
   const handleSendMessage = (text: string, channel: 'TEAM' | 'BLOCK') => {
-      if (!myProfile) {
-          if (isAdmin) {
-              alert("운영자 모드에서는 캐릭터로 참가해야 채팅을 사용할 수 있습니다. (추후 업데이트 예정)");
-          }
-          return;
-      }
+      if (!myProfile) return;
       
       const targetId = channel === 'TEAM' ? myProfile.teamId : (myProfile.currentBlockId || '');
       
@@ -263,9 +262,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
       const targetBlock = currentMap.blocks.find(b => b.id === blockId);
       if (!targetBlock) return;
 
-      if (myProfile.lastActionTurn === data.currentTurn) {
-          return;
-      }
+      if (myProfile.lastActionTurn === data.currentTurn) return;
 
       let canMove = false;
       if (!myProfile.currentBlockId) {
@@ -275,10 +272,8 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
           if (currentBlock) {
             const dx = Math.abs(targetBlock.colIndex - currentBlock.colIndex);
             const dy = Math.abs(targetBlock.rowIndex - currentBlock.rowIndex);
-            
             const isAdjacent = (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
             const isSame = dx === 0 && dy === 0; 
-            
             if (isAdjacent || isSame) canMove = true;
             else alert("인접한 칸으로만 이동할 수 있습니다.");
           } else {
@@ -411,7 +406,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
       }
 
       if (!combatLocId) {
-          alert(isAdmin ? "선택된 플레이어가 맵 위에 있지 않습니다." : "현재 맵 위에 있지 않습니다.");
+          alert("현재 맵 위에 있지 않습니다.");
           return;
       }
 
@@ -625,54 +620,76 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
             onChangeMap={handleMapChange}
         />
 
-        <div className="flex-1 flex overflow-hidden relative">
-            {/* Left Sidebar: Player List */}
-            <div className="hidden md:flex">
+        {/* Main Content Area - Mobile Optimized */}
+        <div className="flex-1 relative overflow-hidden bg-[#1a1a1a]">
+            {/* Scrollable Map Container */}
+            <div className="w-full h-full overflow-auto flex items-center justify-center p-4">
+                <FactionMapCanvas 
+                    currentMap={currentMap} 
+                    players={players}
+                    isAdmin={isAdmin}
+                    myProfile={myProfile} 
+                    onBlockClick={handleBlockClick}
+                    factions={data.factions}
+                />
+            </div>
+
+            {/* Waiting For Next Turn Overlay */}
+            {!isAdmin && isTurnFinished && !combatState.isActive && (
+                <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in pointer-events-none">
+                    <div className="bg-[#1e1e1e] p-6 rounded-2xl border border-[#444] shadow-2xl flex flex-col items-center max-w-xs text-center pointer-events-auto">
+                            <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-3 animate-pulse">
+                            <Lock size={24} className="text-gray-400" />
+                            </div>
+                            <h2 className="text-xl font-bold mb-2">행동 완료</h2>
+                            <p className="text-gray-400 text-sm mb-4">
+                                다음 턴 대기 중...
+                            </p>
+                            <div className="flex items-center gap-2 px-3 py-1 bg-black/40 rounded-full border border-gray-700">
+                            <Hourglass size={14} className="text-orange-400 animate-spin-slow" />
+                            <span className="font-mono font-bold text-sm text-orange-400">TURN {data.currentTurn}</span>
+                            </div>
+                    </div>
+                </div>
+            )}
+        </div>
+
+        {/* Mobile Floating Buttons */}
+        <div className="fixed bottom-6 left-6 z-30 flex flex-col gap-2">
+            <button 
+                onClick={() => setIsLeftSidebarOpen(true)}
+                className="bg-indigo-600 p-3 rounded-full shadow-lg text-white hover:bg-indigo-500 active:scale-95 transition-transform"
+            >
+                <Menu size={24} />
+            </button>
+        </div>
+        <div className="fixed bottom-6 right-6 z-30 flex flex-col gap-2">
+            <button 
+                onClick={() => setIsRightSidebarOpen(true)}
+                className="bg-orange-600 p-3 rounded-full shadow-lg text-white hover:bg-orange-500 active:scale-95 transition-transform relative"
+            >
+                <MessageSquare size={24} />
+                {chatMessages.length > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-[#1a1a1a]"></span>}
+            </button>
+        </div>
+
+        {/* Mobile Sidebar Modals */}
+        <Modal isOpen={isLeftSidebarOpen} onClose={() => setIsLeftSidebarOpen(false)} title="진영 현황" maxWidth="max-w-full">
+             <div className="h-[60vh] flex flex-col">
                 <FactionSidebar 
                     data={data}
                     players={players}
                     myProfile={myProfile}
                     isAdmin={isAdmin}
                     selectedPlayerId={selectedPlayerId}
-                    onSelectPlayer={setSelectedPlayerId}
+                    onSelectPlayer={(id) => { setSelectedPlayerId(id); setIsLeftSidebarOpen(false); if(isAdmin && id) setIsRightSidebarOpen(true); }}
                     onUpdateProfile={(updates) => myProfile && broadcastProfileUpdate({ ...myProfile, ...updates })}
                 />
-            </div>
+             </div>
+        </Modal>
 
-            {/* Center: Map */}
-            <div className="flex-1 relative flex flex-col">
-                <FactionMapCanvas 
-                    currentMap={currentMap} 
-                    players={players}
-                    isAdmin={isAdmin}
-                    myProfile={myProfile} // Pass myProfile for Fog of War
-                    onBlockClick={handleBlockClick}
-                    factions={data.factions}
-                />
-
-                {/* Waiting For Next Turn Overlay */}
-                {!isAdmin && isTurnFinished && !combatState.isActive && (
-                    <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in">
-                        <div className="bg-[#1e1e1e] p-8 rounded-2xl border border-[#444] shadow-2xl flex flex-col items-center max-w-sm text-center">
-                             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4 animate-pulse">
-                                <Lock size={32} className="text-gray-400" />
-                             </div>
-                             <h2 className="text-2xl font-bold mb-2">행동 완료</h2>
-                             <p className="text-gray-400 mb-6">
-                                 이번 턴의 행동을 마쳤습니다.<br/>
-                                 운영자가 다음 턴을 진행할 때까지 대기하세요.
-                             </p>
-                             <div className="flex items-center gap-2 px-4 py-2 bg-black/40 rounded-full border border-gray-700">
-                                <Hourglass size={16} className="text-orange-400 animate-spin-slow" />
-                                <span className="font-mono font-bold text-lg text-orange-400">TURN {data.currentTurn}</span>
-                             </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Right Sidebar: Chat or Admin Panel */}
-            <div className="hidden md:flex z-20">
+        <Modal isOpen={isRightSidebarOpen} onClose={() => setIsRightSidebarOpen(false)} title={isAdmin && selectedAdminPlayer ? "플레이어 관리" : "채팅"} maxWidth="max-w-full">
+            <div className="h-[60vh] flex flex-col">
                 {isAdmin && selectedAdminPlayer ? (
                      <FactionAdminPanel 
                         selectedPlayer={selectedAdminPlayer}
@@ -694,7 +711,8 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
                     />
                 )}
             </div>
-        </div>
+        </Modal>
+
     </div>
   );
 };

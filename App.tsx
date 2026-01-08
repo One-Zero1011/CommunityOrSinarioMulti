@@ -6,6 +6,7 @@ import { MobilePlayer } from './components/mobile/MobilePlayer';
 import { MobileEditor } from './components/mobile/MobileEditor';
 import { FactionEditor } from './components/faction/FactionEditor';
 import { FactionPlayer } from './components/faction/FactionPlayer';
+import { MobileFactionPlayer } from './components/mobile/MobileFactionPlayer';
 import { Home } from './components/Home';
 import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA } from './lib/constants';
 import { GameData, FactionGameData } from './types';
@@ -132,14 +133,25 @@ function App() {
           />
       )}
       {mode === 'FACTION_PLAYER' && (
-          <FactionPlayer 
+          isMobile ? (
+            <MobileFactionPlayer 
               data={factionData}
               network={network}
               onExit={() => {
                   network.disconnect();
                   setMode('HOME');
               }}
-          />
+            />
+          ) : (
+            <FactionPlayer 
+                data={factionData}
+                network={network}
+                onExit={() => {
+                    network.disconnect();
+                    setMode('HOME');
+                }}
+            />
+          )
       )}
     </>
   );

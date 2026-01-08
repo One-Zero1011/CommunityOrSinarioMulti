@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { FactionPlayerProfile } from '../../../types';
-import { User, ArrowLeft, Activity, Sword, Shield, Zap, Brain, Backpack, Plus, Trash2, Heart, Play, Square, Clock } from 'lucide-react';
+import { User, ArrowLeft, Activity, Sword, Shield, Zap, Brain, Backpack, Plus, Trash2, Heart, Play, Square, Clock, RotateCcw, Megaphone, Send } from 'lucide-react';
 import { StatInput } from '../common/StatInput';
 
 interface FactionAdminPanelProps {
@@ -14,12 +14,17 @@ interface FactionAdminPanelProps {
     onToggleCombat: () => void;
     onNextTurn: () => void;
     onAdvanceGlobalTurn: () => void;
+    
+    // Announcement
+    onSendAnnouncement: (targetId: string | null, title: string, message: string) => void;
 }
 
 export const FactionAdminPanel: React.FC<FactionAdminPanelProps> = ({ 
-    selectedPlayer, onClose, onUpdatePlayer, combatActive, onToggleCombat, onNextTurn, onAdvanceGlobalTurn
+    selectedPlayer, onClose, onUpdatePlayer, combatActive, onToggleCombat, onNextTurn, onAdvanceGlobalTurn, onSendAnnouncement
 }) => {
     const [newItemName, setNewItemName] = useState("");
+    const [announceTitle, setAnnounceTitle] = useState("");
+    const [announceMsg, setAnnounceMsg] = useState("");
 
     if (!selectedPlayer) return null;
 
@@ -42,6 +47,17 @@ export const FactionAdminPanel: React.FC<FactionAdminPanelProps> = ({
             maxHp: newMaxHp,
             hp: Math.min(selectedPlayer.hp, newMaxHp)
         });
+    };
+
+    const sendAnnouncement = (targetId: string | null) => {
+        if (!announceTitle.trim() || !announceMsg.trim()) {
+            alert("제목과 내용을 입력해주세요.");
+            return;
+        }
+        onSendAnnouncement(targetId, announceTitle, announceMsg);
+        alert(targetId ? "메시지를 전송했습니다." : "전체 공지를 전송했습니다.");
+        setAnnounceTitle("");
+        setAnnounceMsg("");
     };
 
     return (
@@ -77,6 +93,60 @@ export const FactionAdminPanel: React.FC<FactionAdminPanelProps> = ({
                     <p className="text-[10px] text-gray-400 mt-2">
                         * 전투가 없는 지역에서 특정 진영이 3턴 연속 머물 경우 점령됩니다.
                     </p>
+                </div>
+
+                {/* Announcement Section */}
+                <div className="bg-[#1e1e1e] p-3 rounded border border-[#444]">
+                    <h4 className="text-xs font-bold text-orange-400 uppercase mb-3 flex items-center gap-2">
+                        <Megaphone size={14} /> 시스템 공지 발송
+                    </h4>
+                    <input 
+                        type="text" 
+                        value={announceTitle}
+                        onChange={(e) => setAnnounceTitle(e.target.value)}
+                        placeholder="공지 제목"
+                        className="w-full bg-[#333] border border-[#555] rounded px-2 py-1.5 text-xs text-white mb-2 focus:border-orange-500 outline-none"
+                    />
+                    <textarea 
+                        value={announceMsg}
+                        onChange={(e) => setAnnounceMsg(e.target.value)}
+                        placeholder="공지 내용..."
+                        rows={2}
+                        className="w-full bg-[#333] border border-[#555] rounded px-2 py-1.5 text-xs text-white mb-2 focus:border-orange-500 outline-none resize-none"
+                    />
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => sendAnnouncement(selectedPlayer.id)}
+                            className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-1.5 rounded text-[10px] border border-gray-500"
+                        >
+                            개인 발송 ({selectedPlayer.name})
+                        </button>
+                        <button 
+                            onClick={() => sendAnnouncement(null)}
+                            className="flex-1 bg-orange-700 hover:bg-orange-600 text-white py-1.5 rounded text-[10px] border border-orange-500"
+                        >
+                            전체 발송
+                        </button>
+                    </div>
+                </div>
+
+                {/* Player Action Management */}
+                <div className="bg-[#1e1e1e] p-3 rounded border border-[#444]">
+                     <h4 className="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center gap-2">
+                        <RotateCcw size={14} /> 플레이어 행동 관리
+                    </h4>
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-gray-300">현재 턴 행동 여부:</span>
+                        <span className={`text-xs font-bold ${selectedPlayer.lastActionTurn ? 'text-red-400' : 'text-green-400'}`}>
+                            {selectedPlayer.lastActionTurn ? '완료' : '가능'}
+                        </span>
+                    </div>
+                    <button 
+                        onClick={() => onUpdatePlayer({ lastActionTurn: 0 })}
+                        className="w-full bg-gray-600 hover:bg-gray-500 text-white py-1.5 rounded text-xs border border-gray-400 shadow-sm flex items-center justify-center gap-2"
+                    >
+                        <RotateCcw size={12} /> 행동 기회 초기화
+                    </button>
                 </div>
 
                 {/* Combat Controls */}
