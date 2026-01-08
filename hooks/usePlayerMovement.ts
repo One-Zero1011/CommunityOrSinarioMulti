@@ -109,7 +109,7 @@ export const usePlayerMovement = ({
                 const newX = Math.max(0, Math.min(MAP_WIDTH - CHAR_SIZE, char.x + dx));
                 const newY = Math.max(0, Math.min(MAP_HEIGHT - CHAR_SIZE, char.y + dy));
 
-                // Always update if position changed, removed the > 0.1 threshold check to prevent 'sticking' near walls
+                // Always update if position changed
                 if (newX !== char.x || newY !== char.y) {
                     // Update Logic
                     const updatedChar = { ...char, x: newX, y: newY, mapId: state.currentMapId };
@@ -119,18 +119,16 @@ export const usePlayerMovement = ({
                     newCharacters[charIndex] = updatedChar;
 
                     // IMPORTANT: Update the ref immediately so the next frame sees the new position
-                    // even if React hasn't finished re-rendering yet.
                     state.characters = newCharacters;
 
                     // Update React State
                     setCharacters(newCharacters);
                     
-                    // Throttled Network Sync (50ms)
+                    // Throttled Network Sync (100ms for optimization)
                     const now = Date.now();
-                    if (now - lastSyncTime.current > 50) {
-                        if (state.networkMode === 'CLIENT') {
-                            state.onSendMoveAction(state.activeCharId, newX, newY, state.currentMapId);
-                        }
+                    if (now - lastSyncTime.current > 100) {
+                        // Call action regardless of mode, let parent handle Host broadcasting
+                        state.onSendMoveAction(state.activeCharId, newX, newY, state.currentMapId);
                         lastSyncTime.current = now;
                     }
                 }

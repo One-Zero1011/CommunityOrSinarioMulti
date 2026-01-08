@@ -65,7 +65,6 @@ export const Player: React.FC<PlayerProps> = ({
 
   // -- Hooks --
   
-  // Use separated movement hook
   usePlayerMovement({
       characters,
       activeCharId,
@@ -74,18 +73,22 @@ export const Player: React.FC<PlayerProps> = ({
       isModalOpen: !!interactionResult,
       setCharacters,
       onSendMoveAction: (charId, x, y, mapId) => {
-          sendToHost({ type: 'REQUEST_MOVE_CHAR', charId, x, y, mapId });
+          if (networkMode === 'CLIENT') {
+            sendToHost({ type: 'REQUEST_MOVE_CHAR', charId, x, y, mapId });
+          } else if (networkMode === 'HOST') {
+            // Host Local Move -> Broadcast Delta
+            broadcast({ type: 'ON_MOVE_CHAR', charId, x, y, mapId });
+          }
       }
   });
 
   // -- Network Logic Sync --
 
-  // Host: Broadcast state changes
+  // Host: Heartbeat Sync & Event-based Sync
   useEffect(() => {
     if (networkMode === 'HOST') {
-        // 새로운 클라이언트가 접속하면(connections 변경 시), 게임 데이터 전체를 다시 뿌려줍니다.
-        broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
-        
+        // Critical updates that need immediate full sync (Map change, Interaction, Chat)
+        // Note: 'characters' removed to prevent movement flood
         broadcast({
             type: 'SYNC_STATE',
             payload: {
@@ -96,7 +99,28 @@ export const Player: React.FC<PlayerProps> = ({
             }
         });
     }
-  }, [currentMapId, characters, interactionResult, chatMessages, networkMode, broadcast, connections.length]); // connections.length 추가
+  }, [currentMapId, interactionResult, chatMessages, networkMode, broadcast, connections.length]); 
+
+  // Host: Heartbeat (Every 2s) to ensure eventual consistency
+  useEffect(() => {
+      if (networkMode === 'HOST') {
+          const interval = setInterval(() => {
+             broadcast({
+                type: 'SYNC_STATE',
+                payload: { currentMapId, characters, interactionResult, chatMessages }
+            });
+          }, 2000);
+          return () => clearInterval(interval);
+      }
+  }, [networkMode, characters, currentMapId, interactionResult, chatMessages, broadcast]);
+
+  // Host: Initial GameData Sync on connection
+  useEffect(() => {
+    if (networkMode === 'HOST') {
+        broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
+    }
+  }, [networkMode, broadcast, connections.length, gameData]);
+
 
   // Client & Host: Handle Incoming Data
   useEffect(() => {
@@ -115,6 +139,7 @@ export const Player: React.FC<PlayerProps> = ({
                     }
                     break;
                 case 'REQUEST_CHAR_UPDATE':
+                    // Critical Update -> Full Sync Triggered by State Change
                     setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, ...data.updates } : c));
                     break;
                 case 'REQUEST_ADD_CHAR':
@@ -130,9 +155,12 @@ export const Player: React.FC<PlayerProps> = ({
                     }]);
                     break;
                 case 'REQUEST_MOVE_CHAR':
+                    // Update Local State
                     setCharacters(prev => prev.map(c => 
                         c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
                     ));
+                    // Broadcast Delta immediately to others
+                    broadcast({ type: 'ON_MOVE_CHAR', charId: data.charId, x: data.x, y: data.y, mapId: data.mapId });
                     break;
             }
         } else if (networkMode === 'CLIENT') {
@@ -140,23 +168,25 @@ export const Player: React.FC<PlayerProps> = ({
             if (data.type === 'SYNC_STATE') {
                 const { currentMapId: sMap, characters: sChars, interactionResult: sRes, chatMessages: sChat } = data.payload;
                 setCurrentMapId(sMap);
-                setCharacters(sChars);
+                setCharacters(sChars); // Full sync overwrites
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
-                // 첫 데이터 로드 완료 처리
                 setIsDataLoaded(true);
+            } else if (data.type === 'ON_MOVE_CHAR') {
+                // Delta Update for Movement
+                setCharacters(prev => prev.map(c => 
+                    c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
+                ));
             } else if (data.type === 'SYNC_GAMEDATA') {
-                console.log("Received Game Data Sync");
                 setGameData(data.payload);
                 setIsDataLoaded(true);
             }
         }
     };
 
-    // Attach listeners
     if (networkMode === 'HOST') {
         connections.forEach(conn => {
-            conn.off('data'); // Remove old listeners to prevent duplication
+            conn.off('data'); 
             conn.on('data', handleAction);
         });
     } else if (networkMode === 'CLIENT' && hostConnection) {

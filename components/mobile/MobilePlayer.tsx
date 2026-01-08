@@ -77,10 +77,8 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
     const updateScale = () => {
         if (mapContainerRef.current) {
             const { width, height } = mapContainerRef.current.getBoundingClientRect();
-            // Calculate scale to fit 1200x800 into the container
             const scaleX = width / 1200;
             const scaleY = height / 800;
-            // Use the smaller scale to ensure full visibility
             setScale(Math.min(scaleX, scaleY, 1));
         }
     };
@@ -93,10 +91,26 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
   // -- Network Logic --
   useEffect(() => {
     if (networkMode === 'HOST') {
+        // Only trigger full sync for non-movement changes automatically
+        // 'characters' is excluded from dependency to prevent movement flood
         broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
         broadcast({ type: 'SYNC_STATE', payload: { currentMapId, characters, interactionResult, chatMessages } });
     }
-  }, [currentMapId, characters, interactionResult, chatMessages, networkMode, broadcast, connections.length]);
+  }, [currentMapId, interactionResult, chatMessages, networkMode, broadcast, connections.length]);
+
+  // Host Heartbeat (2s)
+  useEffect(() => {
+      if (networkMode === 'HOST') {
+          const interval = setInterval(() => {
+             broadcast({
+                type: 'SYNC_STATE',
+                payload: { currentMapId, characters, interactionResult, chatMessages }
+            });
+          }, 2000);
+          return () => clearInterval(interval);
+      }
+  }, [networkMode, characters, currentMapId, interactionResult, chatMessages, broadcast]);
+
 
   useEffect(() => {
     const handleAction = (data: any) => {
@@ -117,7 +131,10 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                     setChatMessages(prev => [...prev, { id: generateId(), senderName: data.senderName, text: data.text, timestamp: Date.now() }]);
                     break;
                 case 'REQUEST_MOVE_CHAR':
+                    // Update Local
                     setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c));
+                    // Broadcast Delta
+                    broadcast({ type: 'ON_MOVE_CHAR', charId: data.charId, x: data.x, y: data.y, mapId: data.mapId });
                     break;
             }
         } else if (networkMode === 'CLIENT') {
@@ -128,6 +145,11 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
                 setIsDataLoaded(true);
+            } else if (data.type === 'ON_MOVE_CHAR') {
+                // Delta Update
+                setCharacters(prev => prev.map(c => 
+                    c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
+                ));
             } else if (data.type === 'SYNC_GAMEDATA') {
                 setGameData(data.payload);
                 setIsDataLoaded(true);
@@ -195,7 +217,6 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
 
   // -- Animation Loop --
   const animate = useCallback(() => {
-      // interactionResult가 있으면 이동 중지 (모달이 열린 상태)
       if (interactionResult) {
           requestRef.current = requestAnimationFrame(animate);
           return;
@@ -227,12 +248,16 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                       newChars[charIndex] = { ...char, x: newX, y: newY, mapId: currentMap };
                       
                       setCharacters(newChars);
-                      // Update StateRef immediately to avoid jitter
                       stateRef.current.characters = newChars;
 
                       const now = Date.now();
-                      if (now - lastSyncTime.current > 50 && networkMode === 'CLIENT') {
-                          sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
+                      if (now - lastSyncTime.current > 100) {
+                          if (networkMode === 'CLIENT') {
+                              sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
+                          } else if (networkMode === 'HOST') {
+                              // Host Local Move -> Broadcast Delta
+                              broadcast({ type: 'ON_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
+                          }
                           lastSyncTime.current = now;
                       }
                   }
@@ -240,7 +265,7 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
           }
       }
       requestRef.current = requestAnimationFrame(animate);
-  }, [interactionResult, networkMode, sendToHost]);
+  }, [interactionResult, networkMode, sendToHost, broadcast]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);

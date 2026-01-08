@@ -1,3 +1,5 @@
+
+
 import { ProbabilityProfile, ResultType } from '../types';
 
 export const rollDice = (profile: ProbabilityProfile): ResultType => {
@@ -33,4 +35,62 @@ export const getResultLabel = (type: ResultType): string => {
     case 'CRITICAL_FAILURE': return '대실패';
     default: return '';
   }
+};
+
+// --- Faction Combat Logic ---
+
+// Attack: 1->1D20, 2->1D25, 3->1D30, 4->1D35, 5->1D40
+export const rollFactionAttack = (atkStat: number): { roll: number, maxDie: number } => {
+    const safeStat = Math.max(1, Math.min(5, atkStat));
+    const maxDie = 15 + (safeStat * 5); // 20, 25, 30, 35, 40
+    const roll = Math.floor(Math.random() * maxDie) + 1;
+    return { roll, maxDie };
+};
+
+// Defense: 1->1D20, 2->1D25, 3->1D30, 4->1D35, 5->1D40
+export const rollFactionDefend = (defStat: number): { roll: number, maxDie: number } => {
+    const safeStat = Math.max(1, Math.min(5, defStat));
+    const maxDie = 15 + (safeStat * 5); // 20, 25, 30, 35, 40
+    const roll = Math.floor(Math.random() * maxDie) + 1;
+    return { roll, maxDie };
+};
+
+// Heal Check:
+// 1: >18 (1D5)
+// 2: >16 (1D8)
+// 3: >14 (1D10)
+// 4: >12 (1D13)
+// 5: >10 (1D15)
+export const rollFactionHeal = (spiStat: number): { success: boolean, checkRoll: number, checkThreshold: number, healAmount: number, healDie: number } => {
+    const safeStat = Math.max(1, Math.min(5, spiStat));
+    
+    // Threshold Calculation: 20 - (stat * 2) => 18, 16, 14, 12, 10
+    const checkThreshold = 20 - (safeStat * 2);
+    const checkRoll = Math.floor(Math.random() * 20) + 1; // 1D20
+    const success = checkRoll > checkThreshold;
+
+    let healAmount = 0;
+    
+    // Heal Die Mapping: 5, 8, 10, 13, 15
+    const healDies = [5, 8, 10, 13, 15];
+    const healDie = healDies[safeStat - 1];
+
+    if (success) {
+        healAmount = Math.floor(Math.random() * healDie) + 1;
+    }
+
+    return { success, checkRoll, checkThreshold, healAmount, healDie };
+};
+
+// Flee Check:
+// Turn 1: >18
+// Turn 2: >16
+// Turn 3: >14
+// Turn 4: >12
+// Turn 5+: >10
+export const rollFactionFlee = (turnCount: number): { success: boolean, roll: number, threshold: number } => {
+    const effectiveTurn = Math.min(5, Math.max(1, turnCount));
+    const threshold = 20 - (effectiveTurn * 2); // 18, 16, 14, 12, 10
+    const roll = Math.floor(Math.random() * 20) + 1;
+    return { success: roll > threshold, roll, threshold };
 };

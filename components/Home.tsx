@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Edit3, PlayCircle, Upload, Dice5, Users, Wifi, CheckCircle2 } from 'lucide-react';
+import { Edit3, PlayCircle, Upload, Dice5, Users, Wifi, CheckCircle2, Grid, Sword, LogIn } from 'lucide-react';
 import { Button } from './common/Button';
 
 interface HomeProps {
@@ -9,15 +9,19 @@ interface HomeProps {
   onStartHost: () => void;
   onJoinGame: (hostId: string) => void;
   onLoadFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onStartFactionEditor: () => void;
+  onLoadFactionFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onJoinFactionGame: (hostId: string) => void;
   isConnecting: boolean;
   loadedFileMessage?: string | null;
 }
 
 export const Home: React.FC<HomeProps> = ({ 
-  onStartEditor, onStartPlayer, onStartHost, onJoinGame, onLoadFile, isConnecting, loadedFileMessage 
+  onStartEditor, onStartPlayer, onStartHost, onJoinGame, onLoadFile, onStartFactionEditor, onLoadFactionFile, onJoinFactionGame, isConnecting, loadedFileMessage 
 }) => {
-  const [activeTab, setActiveTab] = useState<'SINGLE' | 'MULTI'>('SINGLE');
+  const [activeTab, setActiveTab] = useState<'SINGLE' | 'MULTI' | 'FACTION'>('SINGLE');
   const [joinId, setJoinId] = useState('');
+  const [factionJoinId, setFactionJoinId] = useState('');
 
   return (
     <div className="min-h-screen bg-[#2e2e2e] text-gray-100 flex flex-col items-center justify-center p-4">
@@ -36,23 +40,29 @@ export const Home: React.FC<HomeProps> = ({
           </p>
         </div>
 
-        <div className="flex justify-center gap-4 mb-8">
+        <div className="flex justify-center gap-4 mb-8 flex-wrap">
             <button 
                 onClick={() => setActiveTab('SINGLE')}
-                className={`px-6 py-2 rounded-full font-bold transition-all ${activeTab === 'SINGLE' ? 'bg-white text-black' : 'bg-[#383838] text-gray-400'}`}
+                className={`px-6 py-2 rounded-full font-bold transition-all ${activeTab === 'SINGLE' ? 'bg-white text-black' : 'bg-[#383838] text-gray-400 hover:bg-[#444]'}`}
             >
                 싱글플레이 / 제작
             </button>
             <button 
                 onClick={() => setActiveTab('MULTI')}
-                className={`px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 ${activeTab === 'MULTI' ? 'bg-indigo-500 text-white' : 'bg-[#383838] text-gray-400'}`}
+                className={`px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 ${activeTab === 'MULTI' ? 'bg-indigo-500 text-white' : 'bg-[#383838] text-gray-400 hover:bg-[#444]'}`}
             >
                 <Wifi size={16} /> 멀티플레이 (Beta)
             </button>
+            <button 
+                onClick={() => setActiveTab('FACTION')}
+                className={`px-6 py-2 rounded-full font-bold transition-all flex items-center gap-2 ${activeTab === 'FACTION' ? 'bg-orange-600 text-white' : 'bg-[#383838] text-gray-400 hover:bg-[#444]'}`}
+            >
+                <Sword size={16} /> 진영 멀티플레이
+            </button>
         </div>
 
-        {activeTab === 'SINGLE' ? (
-            <div className="grid md:grid-cols-2 gap-8 w-full max-w-2xl mx-auto">
+        {activeTab === 'SINGLE' && (
+            <div className="grid md:grid-cols-2 gap-8 w-full max-w-3xl mx-auto animate-fade-in">
             <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-indigo-500 transition-all hover:shadow-2xl hover:shadow-indigo-900/20 group">
                 <h2 className="text-2xl font-bold mb-4 flex items-center justify-center gap-2 group-hover:text-indigo-400">
                 <Edit3 /> 시나리오 제작
@@ -61,31 +71,57 @@ export const Home: React.FC<HomeProps> = ({
                 <Button fullWidth onClick={onStartEditor} variant="secondary">에디터 실행</Button>
             </div>
 
-            <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-emerald-500 transition-all hover:shadow-2xl hover:shadow-emerald-900/20 group">
+            <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-emerald-500 transition-all hover:shadow-2xl hover:shadow-emerald-900/20 group flex flex-col">
                 <h2 className="text-2xl font-bold mb-4 flex items-center justify-center gap-2 group-hover:text-emerald-400">
                 <PlayCircle /> 조사 시작
                 </h2>
-                <p className="text-gray-400 mb-8 h-12">제작된 시나리오 파일을 불러와 시작합니다.</p>
-                <div className="flex flex-col gap-3">
-                    <label className="w-full bg-[#2e2e2e] hover:bg-[#252525] border border-[#555] cursor-pointer text-white font-bold py-2 px-6 rounded-lg transition-colors text-center flex items-center justify-center gap-2">
-                        <Upload size={18} /> 파일 불러오기
-                        <input type="file" accept=".json,.zip" onChange={onLoadFile} className="hidden" />
-                    </label>
-                    
-                    {loadedFileMessage && (
-                      <div className="flex items-center justify-center gap-1 text-green-400 text-sm font-bold animate-pulse">
-                        <CheckCircle2 size={16} />
-                        <span>{loadedFileMessage}</span>
-                      </div>
-                    )}
+                <p className="text-gray-400 mb-6 h-10 text-sm">파일을 불러와 호스트가 되거나 코드로 참가합니다.</p>
+                
+                <div className="flex flex-col gap-4 mt-auto">
+                    {/* Host Section */}
+                    <div className="space-y-2">
+                        <label className="w-full bg-[#2e2e2e] hover:bg-[#252525] border border-[#555] cursor-pointer text-white font-bold py-3 px-6 rounded-lg transition-colors text-center flex items-center justify-center gap-2 hover:border-emerald-500/50">
+                            <Upload size={18} className="text-emerald-400"/> 파일 불러오기
+                            <input type="file" accept=".json,.zip" onChange={onLoadFile} className="hidden" />
+                        </label>
+                        
+                        {loadedFileMessage && (
+                          <div className="flex items-center justify-center gap-1 text-green-400 text-sm font-bold animate-pulse">
+                            <CheckCircle2 size={16} />
+                            <span>{loadedFileMessage}</span>
+                          </div>
+                        )}
 
-                    <button onClick={onStartPlayer} className="text-sm text-gray-500 hover:text-emerald-400 underline decoration-dotted mt-1">
-                        또는 현재 데이터로 바로 시작
-                    </button>
+                        <button onClick={onStartPlayer} className="w-full text-xs text-gray-500 hover:text-emerald-400 underline decoration-dotted">
+                            (파일 없이 바로 시작)
+                        </button>
+                    </div>
+
+                    <div className="relative flex py-1 items-center">
+                        <div className="flex-grow border-t border-[#555]"></div>
+                        <span className="flex-shrink-0 mx-2 text-gray-500 text-xs">OR</span>
+                        <div className="flex-grow border-t border-[#555]"></div>
+                    </div>
+
+                    {/* Join Section */}
+                    <div className="flex gap-2">
+                        <input 
+                            type="text" 
+                            placeholder="참가 코드"
+                            value={joinId}
+                            onChange={(e) => setJoinId(e.target.value)}
+                            className="flex-1 bg-[#2e2e2e] border border-[#555] rounded px-3 py-2 text-center font-mono focus:border-blue-500 outline-none uppercase text-sm text-white placeholder-gray-600"
+                        />
+                        <Button variant="join" onClick={() => onJoinGame(joinId)} disabled={!joinId || isConnecting} className="px-4 text-sm whitespace-nowrap">
+                            참가
+                        </Button>
+                    </div>
                 </div>
             </div>
             </div>
-        ) : (
+        )}
+
+        {activeTab === 'MULTI' && (
             <div className="grid md:grid-cols-2 gap-8 w-full max-w-2xl mx-auto animate-fade-in">
                 <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-orange-500 transition-all group relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-10"><Users size={120} /></div>
@@ -110,6 +146,52 @@ export const Home: React.FC<HomeProps> = ({
                         <Button fullWidth variant="join" onClick={() => onJoinGame(joinId)} disabled={!joinId || isConnecting}>
                             {isConnecting ? '연결 중...' : '입장하기'}
                         </Button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {activeTab === 'FACTION' && (
+            <div className="grid md:grid-cols-2 gap-8 w-full max-w-3xl mx-auto animate-fade-in">
+                 <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-yellow-500 transition-all group">
+                    <h2 className="text-2xl font-bold mb-4 flex items-center justify-center gap-2 group-hover:text-yellow-400">
+                    <Grid /> 진영 맵 제작
+                    </h2>
+                    <p className="text-gray-400 mb-8 h-12">네모난 블록들을 이용해 진영 점령전 맵을 제작합니다.<br/>(시나리오 모드와 별개입니다)</p>
+                    <Button fullWidth onClick={onStartFactionEditor} variant="secondary">진영 에디터 실행</Button>
+                </div>
+
+                <div className="bg-[#383838] p-8 rounded-2xl border border-[#444] hover:border-orange-500 transition-all group relative overflow-hidden flex flex-col">
+                     <div className="absolute top-0 right-0 p-4 opacity-10"><Sword size={120} /></div>
+                    <h2 className="text-2xl font-bold mb-4 flex items-center justify-center gap-2 text-orange-400">
+                    <Sword /> 진영 게임
+                    </h2>
+                    <p className="text-gray-400 mb-6 h-10 text-sm">제작된 파일을 불러오거나, 코드를 입력해 참가합니다.</p>
+                    
+                    <div className="flex flex-col gap-4 mt-auto">
+                        <label className="w-full bg-[#2e2e2e] hover:bg-[#252525] border border-[#555] cursor-pointer text-white font-bold py-3 px-6 rounded-lg transition-colors text-center flex items-center justify-center gap-2 hover:border-orange-500/50">
+                            <Upload size={18} className="text-orange-400" /> 파일 불러오기 (Host)
+                            <input type="file" accept=".json" onChange={onLoadFactionFile} className="hidden" />
+                        </label>
+
+                        <div className="relative flex py-1 items-center">
+                            <div className="flex-grow border-t border-[#555]"></div>
+                            <span className="flex-shrink-0 mx-2 text-gray-500 text-xs">OR</span>
+                            <div className="flex-grow border-t border-[#555]"></div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <input 
+                                type="text" 
+                                placeholder="참가 코드"
+                                value={factionJoinId}
+                                onChange={(e) => setFactionJoinId(e.target.value)}
+                                className="flex-1 bg-[#2e2e2e] border border-[#555] rounded px-3 py-2 text-center font-mono focus:border-orange-500 outline-none uppercase text-sm text-white placeholder-gray-600"
+                            />
+                            <Button variant="join" onClick={() => onJoinFactionGame(factionJoinId)} disabled={!factionJoinId || isConnecting} className="px-4 text-sm whitespace-nowrap bg-orange-700 hover:bg-orange-600">
+                                참가
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -2,7 +2,7 @@
 import JSZip from 'jszip';
 // @ts-ignore
 import * as XLSX from 'xlsx';
-import { GameData, MapScene, MapObject } from '../types';
+import { GameData, MapScene, MapObject, FactionGameData } from '../types';
 import { blobToBase64 } from './utils';
 
 export const exportGameDataToZip = async (data: GameData) => {
@@ -227,4 +227,23 @@ export const loadGameDataFromFile = async (file: File): Promise<GameData> => {
   } else {
     throw new Error('지원하지 않는 파일 형식입니다. (.json 또는 .zip)');
   }
+};
+
+export const loadFactionDataFromFile = async (file: File): Promise<FactionGameData> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const json = JSON.parse(event.target?.result as string);
+          if (!json.maps || !Array.isArray(json.maps) || !json.factions) {
+             throw new Error("올바르지 않은 진영 데이터 형식입니다.");
+          }
+          resolve(json);
+        } catch (err) {
+          reject('파일 로드 실패: ' + err);
+        }
+      };
+      reader.onerror = () => reject('파일 읽기 실패');
+      reader.readAsText(file);
+    });
 };
