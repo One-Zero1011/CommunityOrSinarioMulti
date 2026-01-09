@@ -6,6 +6,8 @@
 
 
 
+
+
 export type ResultType = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'CRITICAL_FAILURE';
 
 export type ObjectType = 'MAP_LINK' | 'OBJECT' | 'DECORATION';
@@ -230,7 +232,7 @@ export type NetworkAction =
   | { type: 'SYNC_PLAYERS'; players: FactionPlayerProfile[] }
   | { type: 'UPDATE_PLAYER_PROFILE'; profile: FactionPlayerProfile }
   | { type: 'CHANGE_FACTION_MAP'; mapId: string }
-  | { type: 'SYNC_COMBAT_STATE'; state: CombatState }
+  | { type: 'SYNC_COMBAT_STATE'; combats: Record<string, CombatState> }
   | { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] }
   | { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage }
   | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] }

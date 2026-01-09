@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { FactionGameData, FactionPlayerProfile, CombatState, FactionMap, FactionChatMessage, CombatLogEntry } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
@@ -35,19 +34,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   const [players, setPlayers] = useState<FactionPlayerProfile[]>([]);
   const [chatMessages, setChatMessages] = useState<FactionChatMessage[]>([]);
   
-  // Combat State
-  const [combatState, setCombatState] = useState<CombatState>({
-      isActive: false,
-      currentTurnPlayerId: null,
-      combatBlockId: undefined,
-      turnCount: 1,
-      phase: 'ACTION',
-      pendingAction: null,
-      logs: [],
-      factionDamage: {},
-      fledPlayerIds: [],
-      turnOrder: []
-  });
+  // Active Combats State (Key: Block ID)
+  const [activeCombats, setActiveCombats] = useState<Record<string, CombatState>>({});
   
   // Admin View State
   const [adminCombatViewOpen, setAdminCombatViewOpen] = useState(false);
@@ -74,24 +62,31 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   const isTurnFinished = myProfile && myProfile.lastActionTurn === data.currentTurn;
 
   // -- Derived Combat Visibility --
-  const activeCombatPlayer = players.find(p => p.id === combatState.currentTurnPlayerId);
-  const combatBlockId = combatState.combatBlockId;
-  const isProfileInCombat = myProfile && combatBlockId && myProfile.currentBlockId === combatBlockId;
+  let combatToDisplay: CombatState | undefined;
+  
+  if (isAdmin && selectedPlayerId) {
+      const target = players.find(p => p.id === selectedPlayerId);
+      if (target?.currentBlockId) {
+          combatToDisplay = activeCombats[target.currentBlockId];
+      }
+  } else if (myProfile?.currentBlockId) {
+      combatToDisplay = activeCombats[myProfile.currentBlockId];
+  }
+
+  const isCombatActiveForView = combatToDisplay?.isActive || false;
   
   // Admin Combat View Logic
   useEffect(() => {
-      if (combatState.isActive && isAdmin) {
-          if (combatState.turnCount === 1 && combatState.logs.length <= 1) {
+      if (combatToDisplay?.isActive && isAdmin) {
+          if (combatToDisplay.turnCount === 1 && combatToDisplay.logs.length <= 1) {
               setAdminCombatViewOpen(true);
           }
-      } else if (!combatState.isActive) {
-          setAdminCombatViewOpen(false);
       }
-  }, [combatState.isActive, isAdmin]);
+  }, [combatToDisplay?.isActive, isAdmin, combatToDisplay?.turnCount]);
 
-  const showCombatUI = combatState.isActive && (
+  const showCombatUI = isCombatActiveForView && (
       (isAdmin && adminCombatViewOpen) || 
-      (!isAdmin && isProfileInCombat)
+      (!isAdmin)
   );
 
   // -- Network Logic --
@@ -104,13 +99,13 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
     if (networkMode === 'HOST') {
         const interval = setInterval(() => {
             broadcast({ type: 'SYNC_FACTION_GAMEDATA', payload: data });
-            if (combatState.isActive) {
-                broadcast({ type: 'SYNC_COMBAT_STATE', state: combatState });
+            if (Object.keys(activeCombats).length > 0) {
+                broadcast({ type: 'SYNC_COMBAT_STATE', combats: activeCombats });
             }
         }, 5000);
         return () => clearInterval(interval);
     }
-  }, [networkMode, broadcast, data, combatState]);
+  }, [networkMode, broadcast, data, activeCombats]);
 
   useEffect(() => {
     const handleAction = (msg: any) => {
@@ -136,8 +131,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                  });
             } else if (msg.type === 'SYNC_COMBAT_STATE') {
                 // Client requesting combat state update
-                setCombatState(msg.state);
-                broadcast({ type: 'SYNC_COMBAT_STATE', state: msg.state });
+                setActiveCombats(msg.combats);
+                broadcast({ type: 'SYNC_COMBAT_STATE', combats: msg.combats });
             }
         } else if (networkMode === 'CLIENT') {
             if (msg.type === 'SYNC_FACTION_GAMEDATA') {
@@ -165,7 +160,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                     setMyProfile(updatedProfile);
                 }
             } else if (msg.type === 'SYNC_COMBAT_STATE') {
-                setCombatState(msg.state);
+                setActiveCombats(msg.combats);
             } else if (msg.type === 'SYNC_FACTION_MAP_DATA') {
                 setData(prev => ({ ...prev, maps: msg.maps }));
             } else if (msg.type === 'SYNC_FACTION_CHAT') {
@@ -289,10 +284,18 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
 
       if (!myProfile) return;
 
+      // Restrict movement if in combat
+      if (activeCombats[myProfile.currentBlockId || '']?.isActive) {
+          alert("전투 중에는 이동할 수 없습니다. '도주'를 사용하세요.");
+          return;
+      }
+
       const targetBlock = currentMap.blocks.find(b => b.id === blockId);
       if (!targetBlock) return;
 
-      if (myProfile.lastActionTurn === data.currentTurn) return;
+      if (myProfile.lastActionTurn === data.currentTurn) {
+          return;
+      }
 
       let canMove = false;
       if (!myProfile.currentBlockId) {
@@ -302,8 +305,10 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           if (currentBlock) {
             const dx = Math.abs(targetBlock.colIndex - currentBlock.colIndex);
             const dy = Math.abs(targetBlock.rowIndex - currentBlock.rowIndex);
+            
             const isAdjacent = (dx === 1 && dy === 0) || (dx === 0 && dy === 1);
             const isSame = dx === 0 && dy === 0; 
+            
             if (isAdjacent || isSame) canMove = true;
             else alert("인접한 칸으로만 이동할 수 있습니다.");
           } else {
@@ -324,6 +329,11 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
     if (!currentMap) return;
     
     const newBlocks = currentMap.blocks.map(block => {
+        // Skip blocks with active combat
+        if (activeCombats[block.id]?.isActive) {
+            return block;
+        }
+
         const occupants = players.filter(p => p.currentBlockId === block.id);
         const factionsPresent = new Set(occupants.map(p => p.factionId));
         let newBlock = { ...block };
@@ -359,28 +369,39 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
     }
   };
 
-  // -- Combat Logic --
+  // -- Combat Logic (Multi-instance) --
   
-  const syncCombatState = (newState: CombatState) => {
-      setCombatState(newState);
+  const syncCombats = (newCombats: Record<string, CombatState>) => {
+      setActiveCombats(newCombats);
       if (networkMode === 'HOST') {
-          broadcast({ type: 'SYNC_COMBAT_STATE', state: newState });
+          broadcast({ type: 'SYNC_COMBAT_STATE', combats: newCombats });
       } else {
-          // If I am a client, I must tell the Host to update the state
-          sendToHost({ type: 'SYNC_COMBAT_STATE', state: newState });
+          sendToHost({ type: 'SYNC_COMBAT_STATE', combats: newCombats });
       }
   };
 
-  const endCombat = (winnerFactionId: string | null, loserFactionId: string | null, reason: string) => {
-      let finalLogs = [...combatState.logs, { id: generateId(), timestamp: Date.now(), text: `🏁 전투 종료! (${reason})`, type: 'SYSTEM' as const }];
+  const updateCombatState = (blockId: string, newState: CombatState | undefined) => {
+      const newCombats = { ...activeCombats };
+      if (newState) {
+          newCombats[blockId] = newState;
+      } else {
+          delete newCombats[blockId];
+      }
+      syncCombats(newCombats);
+  };
+
+  const endCombat = (blockId: string, winnerFactionId: string | null, loserFactionId: string | null, reason: string) => {
+      const currentCombat = activeCombats[blockId];
+      if (!currentCombat) return;
+
+      let finalLogs = [...currentCombat.logs, { id: generateId(), timestamp: Date.now(), text: `🏁 전투 종료! (${reason})`, type: 'SYSTEM' as const }];
       const winnerFaction = data.factions.find(f => f.id === winnerFactionId);
       const loserFaction = data.factions.find(f => f.id === loserFactionId);
 
       if (winnerFaction) {
           finalLogs.push({ id: generateId(), timestamp: Date.now(), text: `🏆 승리: ${winnerFaction.name}`, type: 'SYSTEM' });
-          const combatLocId = combatState.combatBlockId;
-          if (currentMap && combatLocId) {
-              const newBlocks = currentMap.blocks.map(b => b.id === combatLocId ? { ...b, ownerId: winnerFactionId!, occupationProgress: 0 } : b);
+          if (currentMap) {
+              const newBlocks = currentMap.blocks.map(b => b.id === blockId ? { ...b, ownerId: winnerFactionId!, occupationProgress: 0 } : b);
               const newMap = { ...currentMap, blocks: newBlocks };
               updateMapData(data.maps.map(m => m.id === currentMapId ? newMap : m));
           }
@@ -391,9 +412,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
            if (currentMap) {
                const unoccupiedBlocks = currentMap.blocks.filter(b => !b.ownerId);
                const targetPool = unoccupiedBlocks.length > 0 ? unoccupiedBlocks : currentMap.blocks;
-               const losers = players.filter(p => p.factionId === loserFactionId);
+               const losers = players.filter(p => p.factionId === loserFactionId && p.currentBlockId === blockId);
                
-               // Fix: Select ONE random block for ALL losers to move to, instead of scattering them
                const randomBlock = targetPool[Math.floor(Math.random() * targetPool.length)];
                
                losers.forEach(loser => {
@@ -401,19 +421,18 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                });
            }
       }
-      const newState: CombatState = {
-          isActive: false, currentTurnPlayerId: null, combatBlockId: undefined, turnCount: 1, phase: 'ACTION', pendingAction: null, logs: finalLogs, factionDamage: {}, fledPlayerIds: [], turnOrder: []
-      };
-      syncCombatState(newState);
+      
+      updateCombatState(blockId, undefined);
   };
   
-  const checkCombatVictory = (currentState: CombatState) => {
-      const combatLocId = currentState.combatBlockId;
-      if (!combatLocId) return;
+  const checkCombatVictory = (blockId: string, currentState: CombatState) => {
+      if (!blockId) return;
 
-      const combatants = players.filter(p => p.currentBlockId === combatLocId);
-      const factionsInvolved = Array.from(new Set(combatants.map(p => p.factionId)));
+      const combatants = players.filter(p => p.currentBlockId === blockId);
+      const factionsInvolved = Array.from(new Set(combatants.map(p => p.factionId))) as string[];
+      
       if (factionsInvolved.length < 2) return; 
+      
       const factionStats = factionsInvolved.map(fid => {
           const members = combatants.filter(p => p.factionId === fid);
           const activeMembers = members.filter(p => p.hp > 0 && !currentState.fledPlayerIds.includes(p.id));
@@ -423,40 +442,47 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       if (survivingFactions.length === 1) {
           const winner = survivingFactions[0];
           const loser = factionStats.find(f => f.fid !== winner.fid);
-          endCombat(winner.fid, loser?.fid || null, "적군 전멸/도주");
+          endCombat(blockId, winner.fid, loser?.fid || null, "적군 전멸/도주");
           return;
       }
-      if (survivingFactions.length === 0) { endCombat(null, null, "무승부 (전원 불능)"); return; }
+      if (survivingFactions.length === 0) { endCombat(blockId, null, null, "무승부 (전원 불능)"); return; }
+      
       if (currentState.turnCount > 5) {
           let minDamage = Infinity; let winnerId = null; let loserId = null;
           factionsInvolved.forEach(fid => {
                const dmg = currentState.factionDamage[fid] || 0;
                if (dmg < minDamage) { minDamage = dmg; winnerId = fid; } else { loserId = fid; }
           });
-          if (winnerId) { endCombat(winnerId, loserId, "5턴 종료 (피해량 판정)"); } else { endCombat(null, null, "5턴 종료 (피해량 동점)"); }
+          if (winnerId) { endCombat(blockId, winnerId, loserId, "5턴 종료 (피해량 판정)"); } else { endCombat(blockId, null, null, "5턴 종료 (피해량 동점)"); }
       }
   };
   
-  const toggleCombat = () => {
-      let combatLocId: string | undefined;
-      if (isAdmin && selectedPlayerId) {
-          const targetPlayer = players.find(p => p.id === selectedPlayerId);
-          combatLocId = targetPlayer?.currentBlockId;
-      } else {
-          combatLocId = myProfile?.currentBlockId;
+  const toggleCombat = (targetBlockId?: string) => {
+      let combatLocId = targetBlockId;
+      
+      // Determine location if not provided
+      if (!combatLocId) {
+          if (isAdmin && selectedPlayerId) {
+              const targetPlayer = players.find(p => p.id === selectedPlayerId);
+              combatLocId = targetPlayer?.currentBlockId;
+          } else {
+              combatLocId = myProfile?.currentBlockId;
+          }
       }
 
       if (!combatLocId) {
-          alert("현재 맵 위에 있지 않습니다.");
+          alert("유효한 전투 위치가 아닙니다.");
           return;
       }
 
       const combatPlayers = players.filter(p => p.currentBlockId === combatLocId && p.hp > 0);
       if (combatPlayers.length === 0) return;
 
-      if (!combatState.isActive) {
-          // Start Combat - Determine Initiative
-          const factionsInvolved = Array.from(new Set(combatPlayers.map(p => p.factionId)));
+      const existingCombat = activeCombats[combatLocId];
+
+      if (!existingCombat) {
+          // Start Combat
+          const factionsInvolved = Array.from(new Set(combatPlayers.map(p => p.factionId))) as string[];
           
           const factionInitiative = factionsInvolved.map(fid => {
               const members = combatPlayers.filter(p => p.factionId === fid);
@@ -464,38 +490,49 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
               const sortedMembers = [...members].sort((a, b) => b.stats.agility - a.stats.agility);
               return { fid, totalAgility, members: sortedMembers };
           });
+
           factionInitiative.sort((a, b) => b.totalAgility - a.totalAgility);
           const turnOrder = factionInitiative.flatMap(f => f.members.map(p => p.id));
           const firstPlayerId = turnOrder[0];
 
           const newState: CombatState = {
-              isActive: true, currentTurnPlayerId: firstPlayerId, combatBlockId: combatLocId, turnCount: 1, phase: 'ACTION', pendingAction: null,
-              logs: [{ id: generateId(), timestamp: Date.now(), text: "⚠️ 전투가 시작되었습니다!", type: 'SYSTEM' }], factionDamage: {}, fledPlayerIds: [], turnOrder
+              isActive: true, 
+              currentTurnPlayerId: firstPlayerId, 
+              combatBlockId: combatLocId,
+              turnCount: 1, 
+              phase: 'ACTION', 
+              pendingAction: null,
+              logs: [{ id: generateId(), timestamp: Date.now(), text: "⚠️ 전투가 시작되었습니다! 민첩 총합이 높은 진영이 선공을 가져갑니다.", type: 'SYSTEM' }], 
+              factionDamage: {}, 
+              fledPlayerIds: [],
+              turnOrder
           };
-          syncCombatState(newState);
+          updateCombatState(combatLocId, newState);
       } else {
-          const newState: CombatState = {
-              isActive: false, currentTurnPlayerId: null, combatBlockId: undefined, turnCount: 1, phase: 'ACTION', pendingAction: null,
-              logs: [{ id: generateId(), timestamp: Date.now(), text: "🏁 전투가 중단되었습니다.", type: 'SYSTEM' }], factionDamage: {}, fledPlayerIds: [], turnOrder: []
-          };
-          syncCombatState(newState);
+          // Stop Combat
+          // Just remove it or mark as inactive? Removing is cleaner for "Stop"
+          // If we want to keep logs, we could keep it but set isActive: false. 
+          // For now, let's remove it to clear the state fully.
+          updateCombatState(combatLocId, undefined);
       }
   };
 
-  // Replaced nextTurn with resolveTurn to handle auto-progression
-  const resolveTurn = (extraLogs: CombatLogEntry[] = [], damageUpdates: Record<string, number> = {}) => {
-      if (!combatState.isActive || players.length === 0) return;
-      const combatLocId = combatState.combatBlockId;
-      if (!combatLocId) { endCombat(null, null, "전투원 없음 (위치 오류)"); return; }
+  const resolveTurn = (targetBlockId?: string, extraLogs: CombatLogEntry[] = [], damageUpdates: Record<string, number> = {}) => {
+      const blockId = targetBlockId || combatToDisplay?.combatBlockId;
+      if (!blockId) return;
+      
+      const currentCombat = activeCombats[blockId];
+      if (!currentCombat || !currentCombat.isActive) return;
 
-      const { turnOrder } = combatState;
+      const { turnOrder } = currentCombat;
       if (turnOrder.length === 0) return;
 
-      const currentIdx = turnOrder.indexOf(combatState.currentTurnPlayerId || '');
+      const currentIdx = turnOrder.indexOf(currentCombat.currentTurnPlayerId || '');
+      
       let nextIdx = currentIdx;
       let nextPlayerId = null;
       let loops = 0;
-      let nextTurnCount = combatState.turnCount;
+      let nextTurnCount = currentCombat.turnCount;
       let found = false;
 
       while (!found && loops < turnOrder.length + 1) {
@@ -505,7 +542,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           const pid = turnOrder[nextIdx];
           const player = players.find(p => p.id === pid);
           
-          if (player && player.hp > 0 && player.currentBlockId === combatLocId && !combatState.fledPlayerIds.includes(player.id)) {
+          if (player && player.hp > 0 && player.currentBlockId === blockId && !currentCombat.fledPlayerIds.includes(player.id)) {
               nextPlayerId = pid;
               found = true;
           }
@@ -513,84 +550,95 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       }
 
       if (!found || !nextPlayerId) { 
-          endCombat(null, null, "전투원 없음 (전원 불능/도주)"); 
+          endCombat(blockId, null, null, "전투원 없음 (전원 불능/도주)"); 
           return; 
       }
-
+      
       const nextPlayer = players.find(p => p.id === nextPlayerId);
       
-      // Merge Damage
-      const newFactionDamage = { ...combatState.factionDamage };
+      const newFactionDamage = { ...currentCombat.factionDamage };
       Object.entries(damageUpdates).forEach(([fid, amt]) => {
           newFactionDamage[fid] = (newFactionDamage[fid] || 0) + amt;
       });
 
       const newState: CombatState = {
-          ...combatState, 
+          ...currentCombat, 
           currentTurnPlayerId: nextPlayerId, 
           turnCount: nextTurnCount, 
           phase: 'ACTION', 
           pendingAction: null,
           factionDamage: newFactionDamage,
-          logs: [...combatState.logs, ...extraLogs, { id: generateId(), timestamp: Date.now(), text: `⏩ ${nextPlayer?.name}의 차례 (Round ${nextTurnCount})`, type: 'SYSTEM' as const }]
+          logs: [...currentCombat.logs, ...extraLogs, { id: generateId(), timestamp: Date.now(), text: `⏩ ${nextPlayer?.name}의 차례 (Round ${nextTurnCount})`, type: 'SYSTEM' as const }]
       };
       
-      syncCombatState(newState);
-      if (nextTurnCount > 5 && nextIdx === 0) { checkCombatVictory(newState); }
-  };
-  const addCombatLog = (text: string, type: 'ATTACK' | 'HEAL' | 'DEFEND' | 'SYSTEM' | 'FLEE') => {
-      const newLog = { id: generateId(), timestamp: Date.now(), text, type };
-      const newState = { ...combatState, logs: [...combatState.logs, newLog] };
-      syncCombatState(newState);
+      updateCombatState(blockId, newState);
+      
+      if (nextTurnCount > 5 && nextIdx === 0) { 
+          checkCombatVictory(blockId, newState); 
+      }
   };
 
   const handleCombatAction = (type: 'ATTACK' | 'HEAL' | 'FLEE', targetId: string) => {
-      if (!myProfile) return;
+      // Find which combat this belongs to (My location)
+      const blockId = myProfile?.currentBlockId;
+      if (!blockId || !activeCombats[blockId]) return;
+      const combat = activeCombats[blockId];
+
       const source = myProfile;
       const target = players.find(p => p.id === targetId);
-      if (!target) return;
-      
+      if (!target && type !== 'FLEE') return; // Flee targets self effectively
+
       if (type === 'HEAL') {
-          const { success, checkRoll, checkThreshold, healAmount, healDie } = rollFactionHeal(source.stats.spirit);
+          if (!target) return;
+          const { success, checkRoll, checkThreshold, healAmount, healDie } = rollFactionHeal(source!.stats.spirit);
           let logText = "";
           if (success) {
                const newTarget = { ...target, hp: Math.min(target.maxHp, target.hp + healAmount) };
                broadcastProfileUpdate(newTarget);
-               logText = `✨ [${source.name}] 치유 성공! (1D20=${checkRoll} > ${checkThreshold}) ➔ [${target.name}] +${healAmount} (1D${healDie})`;
+               logText = `✨ [${source!.name}] 치유 성공! (1D20=${checkRoll} > ${checkThreshold}) ➔ [${target.name}] +${healAmount} (1D${healDie})`;
           } else { 
-               logText = `💦 [${source.name}] 치유 실패... (1D20=${checkRoll} ≤ ${checkThreshold})`; 
+               logText = `💦 [${source!.name}] 치유 실패... (1D20=${checkRoll} ≤ ${checkThreshold})`; 
           }
           const newLog: CombatLogEntry = { id: generateId(), timestamp: Date.now(), text: logText, type: 'HEAL' };
-          resolveTurn([newLog]);
+          resolveTurn(blockId, [newLog]);
 
       } else if (type === 'ATTACK') {
-          const { roll, maxDie } = rollFactionAttack(source.stats.attack);
+          if (!target) return;
+          const { roll, maxDie } = rollFactionAttack(source!.stats.attack);
           const newState: CombatState = {
-              ...combatState, phase: 'RESPONSE', pendingAction: { type: 'ATTACK', sourceId: source.id, targetId: target.id, damageValue: roll, maxDie },
-              logs: [...combatState.logs, { id: generateId(), timestamp: Date.now(), text: `⚔️ [${source.name}] 공격 ➔ [${target.name}] 데미지 ${roll} (1D${maxDie})! 대응하세요!`, type: 'ATTACK' }]
+              ...combat, phase: 'RESPONSE', pendingAction: { type: 'ATTACK', sourceId: source!.id, targetId: target.id, damageValue: roll, maxDie },
+              logs: [...combat.logs, { id: generateId(), timestamp: Date.now(), text: `⚔️ [${source!.name}] 공격 ➔ [${target.name}] 데미지 ${roll} (1D${maxDie})! 대응하세요!`, type: 'ATTACK' }]
           };
-          syncCombatState(newState);
+          updateCombatState(blockId, newState);
 
       } else if (type === 'FLEE') {
-          const { success, roll, threshold } = rollFactionFlee(combatState.turnCount);
+          const { success, roll, threshold } = rollFactionFlee(combat.turnCount);
           let logText = "";
           let extraLog: CombatLogEntry;
+          
           if (success) {
-              logText = `💨 [${source.name}] 전투 이탈 성공! (1D20=${roll} > ${threshold})`;
+              logText = `💨 [${source!.name}] 전투 이탈 성공! (1D20=${roll} > ${threshold})`;
               extraLog = { id: generateId(), timestamp: Date.now(), text: logText, type: 'FLEE' };
-              combatState.fledPlayerIds.push(source.id);
-              resolveTurn([extraLog]);
+              
+              // Local update for immediate check
+              const updatedCombat = { ...combat, fledPlayerIds: [...combat.fledPlayerIds, source!.id] };
+              updateCombatState(blockId, updatedCombat); // Sync flee state
+              resolveTurn(blockId, [extraLog]);
           } else { 
-              logText = `🚫 [${source.name}] 도주 실패... (1D20=${roll} ≤ ${threshold})`; 
+              logText = `🚫 [${source!.name}] 도주 실패... (1D20=${roll} ≤ ${threshold})`; 
               extraLog = { id: generateId(), timestamp: Date.now(), text: logText, type: 'FLEE' };
-              resolveTurn([extraLog]);
+              resolveTurn(blockId, [extraLog]);
           }
       }
   };
 
   const handleCombatResponse = (type: 'DEFEND' | 'COUNTER' | 'COVER' | 'HEAL' | 'FLEE', responseTargetId?: string) => {
-      if (!myProfile || !combatState.pendingAction) return;
-      const pending = combatState.pendingAction;
+      const blockId = myProfile?.currentBlockId;
+      if (!blockId || !activeCombats[blockId]) return;
+      const combat = activeCombats[blockId];
+
+      if (!combat.pendingAction) return;
+      const pending = combat.pendingAction;
       const attacker = players.find(p => p.id === pending.sourceId);
       const originalTarget = players.find(p => p.id === pending.targetId);
       const responder = myProfile;
@@ -608,28 +656,29 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       };
 
       if (type === 'DEFEND') {
-          const { roll, maxDie } = rollFactionDefend(responder.stats.defense);
+          const { roll, maxDie } = rollFactionDefend(responder!.stats.defense);
           finalDamage = Math.max(0, pending.damageValue - roll);
-          const res = applyDamage(finalDamage, responder);
+          const res = applyDamage(finalDamage, responder!);
           damageUpdates[res.fid] = (damageUpdates[res.fid] || 0) + res.damageDealt;
-          logText = `🛡️ [${responder.name}] 방어! (1D${maxDie}=${roll}) ➔ ${pending.damageValue} 중 ${finalDamage} 피해 받음.`;
+          logText = `🛡️ [${responder!.name}] 방어! (1D${maxDie}=${roll}) ➔ ${pending.damageValue} 중 ${finalDamage} 피해 받음.`;
           
       } else if (type === 'COUNTER') {
           finalDamage = pending.damageValue;
-          const res1 = applyDamage(finalDamage, responder);
+          const res1 = applyDamage(finalDamage, responder!);
           damageUpdates[res1.fid] = (damageUpdates[res1.fid] || 0) + res1.damageDealt;
           
-          const { roll, maxDie } = rollFactionAttack(responder.stats.attack);
+          const { roll, maxDie } = rollFactionAttack(responder!.stats.attack);
           const res2 = applyDamage(roll, attacker);
           damageUpdates[res2.fid] = (damageUpdates[res2.fid] || 0) + res2.damageDealt;
-          logText = `⚔️ [${responder.name}] 반격! ${pending.damageValue} 피해 받고 ➔ [${attacker.name}]에게 ${roll} (1D${maxDie}) 되돌려줌!`;
+          
+          logText = `⚔️ [${responder!.name}] 반격! ${pending.damageValue} 피해 받고 ➔ [${attacker.name}]에게 ${roll} (1D${maxDie}) 되돌려줌!`;
           
       } else if (type === 'COVER') {
-          const { roll, maxDie } = rollFactionDefend(responder.stats.defense);
+          const { roll, maxDie } = rollFactionDefend(responder!.stats.defense);
           finalDamage = Math.max(0, pending.damageValue - roll);
-          const res = applyDamage(finalDamage, responder);
+          const res = applyDamage(finalDamage, responder!);
           damageUpdates[res.fid] = (damageUpdates[res.fid] || 0) + res.damageDealt;
-          logText = `🛡️ [${responder.name}] 대리 방어! [${originalTarget.name}] 대신 맞음. (1D${maxDie}=${roll}) ➔ ${finalDamage} 피해.`;
+          logText = `🛡️ [${responder!.name}] 대리 방어! [${originalTarget.name}] 대신 맞음. (1D${maxDie}=${roll}) ➔ ${finalDamage} 피해.`;
           
       } else if (type === 'HEAL') {
           finalDamage = pending.damageValue;
@@ -637,35 +686,36 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           damageUpdates[res1.fid] = (damageUpdates[res1.fid] || 0) + res1.damageDealt;
           
           const healTarget = players.find(p => p.id === responseTargetId) || responder;
-          const { success, checkRoll, healAmount } = rollFactionHeal(responder.stats.spirit);
+          const { success, checkRoll, healAmount } = rollFactionHeal(responder!.stats.spirit);
           if (success) {
-               const newHealTarget = { ...healTarget, hp: Math.min(healTarget.maxHp, healTarget.hp + healAmount) };
-               if (healTarget.id === originalTarget.id) {
+               const newHealTarget = { ...healTarget!, hp: Math.min(healTarget!.maxHp, healTarget!.hp + healAmount) };
+               if (healTarget!.id === originalTarget.id) {
                    const afterDmg = Math.max(0, originalTarget.hp - finalDamage);
-                   newHealTarget.hp = Math.min(healTarget.maxHp, afterDmg + healAmount);
+                   newHealTarget.hp = Math.min(healTarget!.maxHp, afterDmg + healAmount);
                }
                broadcastProfileUpdate(newHealTarget);
-               logText = `➕ [${responder.name}] 맞으면서 치유! [${originalTarget.name}] ${pending.damageValue} 피해. [${healTarget.name}] +${healAmount} 회복.`;
+               logText = `➕ [${responder!.name}] 맞으면서 치유! [${originalTarget.name}] ${pending.damageValue} 피해. [${healTarget!.name}] +${healAmount} 회복.`;
           } else { 
-              logText = `💦 [${responder.name}] 치유 시도했으나 실패. [${originalTarget.name}] ${pending.damageValue} 피해만 받음.`; 
+              logText = `💦 [${responder!.name}] 치유 시도했으나 실패. [${originalTarget.name}] ${pending.damageValue} 피해만 받음.`; 
           }
           
       } else if (type === 'FLEE') {
-          const { success, roll, threshold } = rollFactionFlee(combatState.turnCount);
+          const { success, roll, threshold } = rollFactionFlee(combat.turnCount);
           if (success) {
-              logText = `💨 [${responder.name}] 도주 성공! 공격을 회피했습니다. (1D20=${roll} > ${threshold})`;
-              combatState.fledPlayerIds.push(responder.id);
+              logText = `💨 [${responder!.name}] 도주 성공! 공격을 회피했습니다. (1D20=${roll} > ${threshold})`;
+              // Update local state temporarily for flee
+              combat.fledPlayerIds.push(responder!.id);
           } else {
               finalDamage = pending.damageValue;
-              const res = applyDamage(finalDamage, responder);
+              const res = applyDamage(finalDamage, responder!);
               damageUpdates[res.fid] = (damageUpdates[res.fid] || 0) + res.damageDealt;
-              logText = `🚫 [${responder.name}] 도주 실패! 붙잡혀서 ${pending.damageValue} 피해 받음. (1D20=${roll} ≤ ${threshold})`;
+              logText = `🚫 [${responder!.name}] 도주 실패! 붙잡혀서 ${pending.damageValue} 피해 받음. (1D20=${roll} ≤ ${threshold})`;
           }
       }
 
-      // Auto-advance turn
+      // Auto-advance
       const newLog: CombatLogEntry = { id: generateId(), timestamp: Date.now(), text: logText, type: type === 'COUNTER' ? 'ATTACK' : (type === 'HEAL' ? 'HEAL' : (type === 'FLEE' ? 'FLEE' : 'DEFEND')) };
-      resolveTurn([newLog], damageUpdates);
+      resolveTurn(blockId, [newLog], damageUpdates);
   };
 
   if (networkMode === 'CLIENT' && !isDataLoaded) {
@@ -708,11 +758,11 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
             </Modal>
         )}
 
-        {showCombatUI && (
+        {showCombatUI && combatToDisplay && (
             <FactionCombatUI 
                 myProfile={myProfile}
                 players={players}
-                combatState={combatState}
+                combatState={combatToDisplay}
                 onAction={handleCombatAction}
                 onResponse={handleCombatResponse}
                 chatMessages={chatMessages}
@@ -735,7 +785,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
             onExit={onExit}
             mapList={data.maps}
             onChangeMap={handleMapChange}
-            combatActive={combatState.isActive}
+            combatActive={!!combatToDisplay?.isActive}
             onWatchCombat={() => setAdminCombatViewOpen(true)}
         />
 
@@ -754,7 +804,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
             </div>
 
             {/* Waiting For Next Turn Overlay */}
-            {!isAdmin && isTurnFinished && !combatState.isActive && (
+            {!isAdmin && isTurnFinished && !isCombatActiveForView && (
                 <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-fade-in pointer-events-none">
                     <div className="bg-[#1e1e1e] p-6 rounded-2xl border border-[#444] shadow-2xl flex flex-col items-center max-w-xs text-center pointer-events-auto">
                             <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mb-3 animate-pulse">
@@ -814,9 +864,9 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                         selectedPlayer={selectedAdminPlayer}
                         onClose={() => setSelectedPlayerId(null)}
                         onUpdatePlayer={updateAdminPlayer}
-                        combatActive={combatState.isActive}
-                        onToggleCombat={toggleCombat}
-                        onNextTurn={() => resolveTurn()}
+                        combatActive={!!(selectedAdminPlayer.currentBlockId && activeCombats[selectedAdminPlayer.currentBlockId]?.isActive)}
+                        onToggleCombat={() => toggleCombat(selectedAdminPlayer.currentBlockId)}
+                        onNextTurn={() => resolveTurn(selectedAdminPlayer.currentBlockId)}
                         onAdvanceGlobalTurn={advanceGlobalTurn}
                         onSendAnnouncement={sendAdminAnnouncement}
                      />

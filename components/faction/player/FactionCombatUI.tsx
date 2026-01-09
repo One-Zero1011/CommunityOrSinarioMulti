@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { FactionPlayerProfile, CombatState, FactionChatMessage } from '../../../types';
 import { Sword, Heart, Shield, AlertTriangle, XCircle, Wind, MessageSquare, Send, EyeOff, User, Skull, Target, Zap } from 'lucide-react';
@@ -119,7 +116,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     };
 
     // -- Helper Components --
-    const PlayerCard = ({ player, isEnemy }: { player: FactionPlayerProfile, isEnemy: boolean }) => {
+    const PlayerCard: React.FC<{ player: FactionPlayerProfile, isEnemy: boolean }> = ({ player, isEnemy }) => {
         const isDead = player.hp <= 0;
         const isFled = combatState.fledPlayerIds.includes(player.id);
         const isActive = player.id === activePlayerId;
