@@ -83,18 +83,33 @@ export const FactionHUD: React.FC<FactionHUDProps> = ({
                 )}
 
                 {networkMode === 'HOST' && peerId && (
-                    <div 
-                        className="flex items-center gap-2 bg-[#111] px-2 md:px-3 py-1.5 rounded-lg border border-[#444] cursor-pointer hover:bg-[#222] transition-colors"
-                        onClick={() => {
-                            navigator.clipboard.writeText(peerId);
-                            setCopiedId(true);
-                            setTimeout(() => setCopiedId(false), 2000);
-                        }}
-                    >
-                        <span className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider hidden sm:inline">CODE:</span>
-                        <span className="font-mono text-xs md:text-sm text-white select-all">{peerId}</span>
-                        {copiedId ? <Check size={14} className="text-green-400" /> : <Copy size={14} className="text-gray-400" />}
-                    </div>
+                    <>
+                        {/* Desktop: Full Code */}
+                        <div 
+                            className="hidden md:flex items-center gap-2 bg-[#111] px-3 py-1.5 rounded-lg border border-[#444] cursor-pointer hover:bg-[#222] transition-colors"
+                            onClick={() => {
+                                navigator.clipboard.writeText(peerId);
+                                setCopiedId(true);
+                                setTimeout(() => setCopiedId(false), 2000);
+                            }}
+                        >
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">CODE:</span>
+                            <span className="font-mono text-sm text-white select-all">{peerId}</span>
+                            {copiedId ? <Check size={14} className="text-green-400" /> : <Copy size={14} className="text-gray-400" />}
+                        </div>
+                        
+                        {/* Mobile: Icon Only */}
+                        <div 
+                            className="md:hidden w-8 h-8 flex items-center justify-center bg-[#111] rounded-lg border border-[#444] cursor-pointer active:scale-95"
+                            onClick={() => {
+                                navigator.clipboard.writeText(peerId);
+                                setCopiedId(true);
+                                setTimeout(() => setCopiedId(false), 2000);
+                            }}
+                        >
+                             {copiedId ? <Check size={14} className="text-green-400" /> : <Copy size={14} className="text-gray-400" />}
+                        </div>
+                    </>
                 )}
                 
                 {isAdmin ? (

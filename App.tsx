@@ -6,6 +6,7 @@ import { MobilePlayer } from './components/mobile/MobilePlayer';
 import { MobileEditor } from './components/mobile/MobileEditor';
 import { FactionEditor } from './components/faction/FactionEditor';
 import { FactionPlayer } from './components/faction/FactionPlayer';
+import { MobileFactionPlayer } from './components/mobile/MobileFactionPlayer';
 import { Home } from './components/Home';
 import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA } from './lib/constants';
 import { GameData, FactionGameData } from './types';
@@ -48,8 +49,6 @@ function App() {
           try {
               const data = await loadFactionDataFromFile(file);
               setFactionData(data);
-              // 호스트 세션 시작
-              network.startHost();
               setMode('FACTION_PLAYER');
           } catch (err) {
               console.error(err);
@@ -134,15 +133,25 @@ function App() {
           />
       )}
       {mode === 'FACTION_PLAYER' && (
-          /* 리사이즈 시 상태 유지를 위해 통합 컴포넌트 FactionPlayer 하나만 사용 */
-          <FactionPlayer 
+          isMobile ? (
+            <MobileFactionPlayer 
               data={factionData}
               network={network}
               onExit={() => {
                   network.disconnect();
                   setMode('HOME');
               }}
-          />
+            />
+          ) : (
+            <FactionPlayer 
+                data={factionData}
+                network={network}
+                onExit={() => {
+                    network.disconnect();
+                    setMode('HOME');
+                }}
+            />
+          )
       )}
     </>
   );
