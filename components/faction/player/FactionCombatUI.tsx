@@ -1,14 +1,18 @@
 
 
 
+
+
+
+
 import React, { useState, useEffect, useRef } from 'react';
-import { FactionPlayerProfile, CombatState, FactionChatMessage } from '../../../types';
-import { Sword, Heart, Shield, AlertTriangle, XCircle, Wind, MessageSquare, Send, EyeOff, User, Skull, Target, Zap } from 'lucide-react';
+import { FactionPlayerProfile, CombatSession, FactionChatMessage } from '../../../types';
+import { Sword, Heart, Shield, Wind, MessageSquare, Send, EyeOff, User, Skull, Target, XCircle, Hourglass } from 'lucide-react';
 
 interface FactionCombatUIProps {
     myProfile: FactionPlayerProfile | null;
     players: FactionPlayerProfile[];
-    combatState: CombatState;
+    combatSession: CombatSession;
     onAction: (type: 'ATTACK' | 'HEAL' | 'FLEE', targetId: string) => void;
     onResponse: (type: 'DEFEND' | 'COUNTER' | 'COVER' | 'HEAL' | 'FLEE', targetId?: string) => void;
     chatMessages: FactionChatMessage[];
@@ -18,7 +22,7 @@ interface FactionCombatUIProps {
 }
 
 export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({ 
-    myProfile, players, combatState, onAction, onResponse, chatMessages, onSendMessage, isAdmin, onClose
+    myProfile, players, combatSession, onAction, onResponse, chatMessages, onSendMessage, isAdmin, onClose
 }) => {
     const [actionStep, setActionStep] = useState<'SELECT_ACTION' | 'SELECT_TARGET'>('SELECT_ACTION');
     const [selectedActionType, setSelectedActionType] = useState<'ATTACK' | 'HEAL' | null>(null);
@@ -33,13 +37,14 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     const [hasNewMsg, setHasNewMsg] = useState(false);
 
     // Derived State
-    const activePlayerId = combatState.currentTurnPlayerId;
+    const activePlayerId = combatSession.currentTurnPlayerId;
     const activePlayer = players.find(p => p.id === activePlayerId);
     const isMyTurn = myProfile && activePlayerId === myProfile.id;
+    const isRoundPaused = combatSession.isActive && !activePlayerId; // New: Check if round is paused
     
     // Split Players
-    // IMPORTANT: Combat participants are determined by the block ID anchored in CombatState
-    const currentBlockId = combatState.combatBlockId;
+    // IMPORTANT: Combat participants are determined by the block ID anchored in CombatSession
+    const currentBlockId = combatSession.combatBlockId;
     
     // Filter players actually in this combat (same block)
     const combatants = players.filter(p => p.currentBlockId === currentBlockId);
@@ -50,12 +55,12 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     // Admin view: Enemies = distinct faction from active player? 
     // Let's stick to perspective: If Admin, view from Active Player's perspective? Or just split arbitrarily.
     // Better: View from "My Profile" perspective. If Admin has no profile, assume Active Player's faction is "Ally" side for visualization.
-    const perspectiveFactionId = myFactionId || activePlayer?.factionId;
+    const perspectiveFactionId = myFactionId || activePlayer?.factionId || combatants[0]?.factionId;
 
     const allies = combatants.filter(p => p.factionId === perspectiveFactionId);
     const enemies = combatants.filter(p => p.factionId !== perspectiveFactionId);
 
-    const pending = combatState.pendingAction;
+    const pending = combatSession.pendingAction;
     const attacker = pending ? players.find(p => p.id === pending.sourceId) : null;
     const target = pending ? players.find(p => p.id === pending.targetId) : null;
 
@@ -111,7 +116,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
         }
 
         // 2. Response Phase Healing Targeting
-        if (combatState.phase === 'RESPONSE' && healTargetStep) {
+        if (combatSession.phase === 'RESPONSE' && healTargetStep) {
             if (isEnemy) return;
             onResponse('HEAL', player.id);
             setHealTargetStep(false);
@@ -121,7 +126,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     // -- Helper Components --
     const PlayerCard = ({ player, isEnemy }: { player: FactionPlayerProfile, isEnemy: boolean }) => {
         const isDead = player.hp <= 0;
-        const isFled = combatState.fledPlayerIds.includes(player.id);
+        const isFled = combatSession.fledPlayerIds.includes(player.id);
         const isActive = player.id === activePlayerId;
         const isTargeted = target?.id === player.id;
         const isMe = myProfile?.id === player.id;
@@ -212,113 +217,134 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                  {/* Turn Indicator Banner */}
                  <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                  
-                 {/* Combat Phase: ACTION */}
-                 {combatState.phase === 'ACTION' && (
+                 {/* Round Pause Message */}
+                 {isRoundPaused ? (
+                     <div className="flex flex-col items-center justify-center gap-3 animate-fade-in">
+                         <div className="bg-[#1e1e1e]/90 p-6 rounded-2xl border border-orange-500/50 shadow-[0_0_30px_rgba(234,88,12,0.2)] text-center max-w-sm">
+                             <div className="flex justify-center mb-3">
+                                <div className="bg-orange-900/30 p-3 rounded-full animate-pulse">
+                                    <Hourglass size={32} className="text-orange-500" />
+                                </div>
+                             </div>
+                             <h2 className="text-xl font-bold text-white mb-2">라운드 종료</h2>
+                             <p className="text-gray-400 text-sm">
+                                 모든 플레이어가 행동을 마쳤습니다.<br/>
+                                 <span className="text-orange-400 font-bold">전체 턴(Global Turn)</span>이 진행될 때까지 대기하세요.
+                             </p>
+                         </div>
+                     </div>
+                 ) : (
+                     /* Active Combat Logic */
                      <>
-                        {isMyTurn ? (
-                            <div className="flex flex-col items-center gap-4 animate-fade-in-up">
-                                {actionStep === 'SELECT_ACTION' ? (
-                                    <>
-                                        <div className="text-yellow-400 font-bold text-lg animate-pulse mb-2">당신의 턴입니다!</div>
-                                        <div className="flex gap-4">
-                                            <button onClick={() => handleActionClick('ATTACK')} className="flex flex-col items-center gap-1 bg-red-900/80 hover:bg-red-600 border border-red-500 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-red-900/50">
-                                                <Sword size={32} className="text-white"/>
-                                                <span className="font-bold text-sm text-white">공격</span>
-                                            </button>
-                                            <button onClick={() => handleActionClick('HEAL')} className="flex flex-col items-center gap-1 bg-green-900/80 hover:bg-green-600 border border-green-500 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-green-900/50">
-                                                <Heart size={32} className="text-white"/>
-                                                <span className="font-bold text-sm text-white">치유</span>
-                                            </button>
-                                            <button onClick={handleFleeAction} className="flex flex-col items-center gap-1 bg-gray-700/80 hover:bg-gray-500 border border-gray-400 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg">
-                                                <Wind size={32} className="text-white"/>
-                                                <span className="font-bold text-sm text-white">도주</span>
-                                            </button>
-                                        </div>
-                                    </>
+                        {/* Combat Phase: ACTION */}
+                        {combatSession.phase === 'ACTION' && (
+                            <>
+                                {isMyTurn ? (
+                                    <div className="flex flex-col items-center gap-4 animate-fade-in-up">
+                                        {actionStep === 'SELECT_ACTION' ? (
+                                            <>
+                                                <div className="text-yellow-400 font-bold text-lg animate-pulse mb-2">당신의 턴입니다!</div>
+                                                <div className="flex gap-4">
+                                                    <button onClick={() => handleActionClick('ATTACK')} className="flex flex-col items-center gap-1 bg-red-900/80 hover:bg-red-600 border border-red-500 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-red-900/50">
+                                                        <Sword size={32} className="text-white"/>
+                                                        <span className="font-bold text-sm text-white">공격</span>
+                                                    </button>
+                                                    <button onClick={() => handleActionClick('HEAL')} className="flex flex-col items-center gap-1 bg-green-900/80 hover:bg-green-600 border border-green-500 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-green-900/50">
+                                                        <Heart size={32} className="text-white"/>
+                                                        <span className="font-bold text-sm text-white">치유</span>
+                                                    </button>
+                                                    <button onClick={handleFleeAction} className="flex flex-col items-center gap-1 bg-gray-700/80 hover:bg-gray-500 border border-gray-400 p-4 rounded-xl w-24 transition-all hover:scale-110 active:scale-95 shadow-lg">
+                                                        <Wind size={32} className="text-white"/>
+                                                        <span className="font-bold text-sm text-white">도주</span>
+                                                    </button>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className="flex flex-col items-center gap-2 animate-bounce-slight">
+                                                <div className="bg-black/50 px-6 py-2 rounded-full border border-white/30 text-white font-bold text-lg">
+                                                    {selectedActionType === 'ATTACK' ? '공격할 적을 선택하세요' : '치유할 아군을 선택하세요'}
+                                                </div>
+                                                <button onClick={() => setActionStep('SELECT_ACTION')} className="text-gray-400 hover:text-white underline text-sm">
+                                                    취소하고 다시 선택
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 ) : (
-                                    <div className="flex flex-col items-center gap-2 animate-bounce-slight">
-                                        <div className="bg-black/50 px-6 py-2 rounded-full border border-white/30 text-white font-bold text-lg">
-                                            {selectedActionType === 'ATTACK' ? '공격할 적을 선택하세요' : '치유할 아군을 선택하세요'}
-                                        </div>
-                                        <button onClick={() => setActionStep('SELECT_ACTION')} className="text-gray-400 hover:text-white underline text-sm">
-                                            취소하고 다시 선택
-                                        </button>
+                                    <div className="flex flex-col items-center gap-2 opacity-80">
+                                        <div className="w-12 h-12 border-4 border-t-orange-500 border-gray-700 rounded-full animate-spin"></div>
+                                        <div className="text-orange-200 font-bold text-lg">{activePlayer?.name}의 턴 진행 중...</div>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {/* Combat Phase: RESPONSE */}
+                        {combatSession.phase === 'RESPONSE' && (
+                            <div className="flex flex-col items-center w-full max-w-lg px-4 animate-fade-in">
+                                {/* Attack Info Card */}
+                                <div className="bg-red-950/80 border border-red-500/50 rounded-lg p-4 flex items-center gap-4 w-full shadow-2xl mb-4 relative overflow-hidden">
+                                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagonal-stripes.png')] opacity-10"></div>
+                                    <div className="flex-1 text-right">
+                                        <div className="text-xs text-red-300">공격자</div>
+                                        <div className="font-bold text-white text-lg">{attacker?.name}</div>
+                                    </div>
+                                    <div className="shrink-0 flex flex-col items-center justify-center bg-black/40 rounded-full w-12 h-12 border border-red-500">
+                                        <Sword size={20} className="text-red-500"/>
+                                        <span className="text-[10px] font-bold text-white">{pending?.damageValue} DMG</span>
+                                    </div>
+                                    <div className="flex-1 text-left">
+                                        <div className="text-xs text-red-300">대상</div>
+                                        <div className="font-bold text-white text-lg">{target?.name}</div>
+                                    </div>
+                                </div>
+
+                                {/* Response Buttons */}
+                                {healTargetStep ? (
+                                    <div className="bg-black/60 p-4 rounded-xl border border-green-500 text-center animate-fade-in">
+                                        <h4 className="text-green-400 font-bold mb-2">치유 대상을 선택하세요 (아군 카드 클릭)</h4>
+                                        <button onClick={() => setHealTargetStep(false)} className="text-sm text-gray-400 underline">취소</button>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 flex-wrap justify-center">
+                                        {target?.id === myProfile?.id && (
+                                            <>
+                                                <button onClick={() => onResponse('DEFEND')} className="bg-blue-800 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-blue-950 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                                                    <Shield size={16}/> 방어
+                                                </button>
+                                                <button onClick={() => onResponse('COUNTER')} className="bg-red-800 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-red-950 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                                                    <Sword size={16}/> 반격
+                                                </button>
+                                                <button onClick={() => onResponse('FLEE')} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                                                    <Wind size={16}/> 도주
+                                                </button>
+                                            </>
+                                        )}
+                                        
+                                        {/* Cover / Heal options for others */}
+                                        {myProfile && target?.id !== myProfile.id && myProfile.teamId === target?.teamId && (
+                                            <button onClick={() => onResponse('COVER')} className="bg-yellow-700 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-yellow-900 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                                                <Shield size={16}/> 대리 방어
+                                            </button>
+                                        )}
+                                        
+                                        {(target?.id === myProfile?.id || (myProfile && target?.teamId === myProfile.teamId)) && (
+                                            <button onClick={() => setHealTargetStep(true)} className="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-green-900 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
+                                                <Heart size={16}/> 응급 치유
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                
+                                {/* Waiting Message */}
+                                {(!isMyTurn && target?.id !== myProfile?.id && !healTargetStep) && (
+                                    <div className="text-gray-400 text-sm animate-pulse mt-2">
+                                        {target?.name}의 대응을 기다리는 중...
                                     </div>
                                 )}
                             </div>
-                        ) : (
-                            <div className="flex flex-col items-center gap-2 opacity-80">
-                                <div className="w-12 h-12 border-4 border-t-orange-500 border-gray-700 rounded-full animate-spin"></div>
-                                <div className="text-orange-200 font-bold text-lg">{activePlayer?.name}의 턴 진행 중...</div>
-                            </div>
                         )}
                      </>
-                 )}
-
-                 {/* Combat Phase: RESPONSE */}
-                 {combatState.phase === 'RESPONSE' && (
-                     <div className="flex flex-col items-center w-full max-w-lg px-4 animate-fade-in">
-                         {/* Attack Info Card */}
-                         <div className="bg-red-950/80 border border-red-500/50 rounded-lg p-4 flex items-center gap-4 w-full shadow-2xl mb-4 relative overflow-hidden">
-                             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagonal-stripes.png')] opacity-10"></div>
-                             <div className="flex-1 text-right">
-                                 <div className="text-xs text-red-300">공격자</div>
-                                 <div className="font-bold text-white text-lg">{attacker?.name}</div>
-                             </div>
-                             <div className="shrink-0 flex flex-col items-center justify-center bg-black/40 rounded-full w-12 h-12 border border-red-500">
-                                 <Sword size={20} className="text-red-500"/>
-                                 <span className="text-[10px] font-bold text-white">{pending?.damageValue} DMG</span>
-                             </div>
-                             <div className="flex-1 text-left">
-                                 <div className="text-xs text-red-300">대상</div>
-                                 <div className="font-bold text-white text-lg">{target?.name}</div>
-                             </div>
-                         </div>
-
-                         {/* Response Buttons */}
-                         {healTargetStep ? (
-                             <div className="bg-black/60 p-4 rounded-xl border border-green-500 text-center animate-fade-in">
-                                 <h4 className="text-green-400 font-bold mb-2">치유 대상을 선택하세요 (아군 카드 클릭)</h4>
-                                 <button onClick={() => setHealTargetStep(false)} className="text-sm text-gray-400 underline">취소</button>
-                             </div>
-                         ) : (
-                             <div className="flex gap-2 flex-wrap justify-center">
-                                 {target?.id === myProfile?.id && (
-                                     <>
-                                        <button onClick={() => onResponse('DEFEND')} className="bg-blue-800 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-blue-950 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
-                                            <Shield size={16}/> 방어
-                                        </button>
-                                        <button onClick={() => onResponse('COUNTER')} className="bg-red-800 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-red-950 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
-                                            <Sword size={16}/> 반격
-                                        </button>
-                                        <button onClick={() => onResponse('FLEE')} className="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
-                                            <Wind size={16}/> 도주
-                                        </button>
-                                     </>
-                                 )}
-                                 
-                                 {/* Cover / Heal options for others */}
-                                 {myProfile && target?.id !== myProfile.id && myProfile.teamId === target?.teamId && (
-                                     <button onClick={() => onResponse('COVER')} className="bg-yellow-700 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-yellow-900 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
-                                         <Shield size={16}/> 대리 방어
-                                     </button>
-                                 )}
-                                 
-                                 {(target?.id === myProfile?.id || (myProfile && target?.teamId === myProfile.teamId)) && (
-                                     <button onClick={() => setHealTargetStep(true)} className="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold border-b-4 border-green-900 active:border-b-0 active:translate-y-1 transition-all flex items-center gap-2">
-                                         <Heart size={16}/> 응급 치유
-                                     </button>
-                                 )}
-                             </div>
-                         )}
-                         
-                         {/* Waiting Message */}
-                         {(!isMyTurn && target?.id !== myProfile?.id && !healTargetStep) && (
-                             <div className="text-gray-400 text-sm animate-pulse mt-2">
-                                 {target?.name}의 대응을 기다리는 중...
-                             </div>
-                         )}
-                     </div>
                  )}
 
                  <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
@@ -349,7 +375,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
 
                  {/* Logs Stream */}
                  <div className="h-full overflow-y-auto pr-10 text-sm space-y-1 custom-scrollbar">
-                     {[...combatState.logs].reverse().map(log => (
+                     {[...combatSession.logs].reverse().map(log => (
                          <div key={log.id} className={`flex gap-2 ${log.type === 'ATTACK' ? 'text-red-300' : log.type === 'HEAL' ? 'text-green-300' : log.type === 'DEFEND' ? 'text-blue-300' : 'text-gray-400'}`}>
                              <span className="text-gray-600 text-[10px] whitespace-nowrap mt-0.5">[{new Date(log.timestamp).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit', second:'2-digit'})}]</span>
                              <span>{log.text}</span>

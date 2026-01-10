@@ -6,6 +6,8 @@
 
 
 
+
+
 export type ResultType = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'CRITICAL_FAILURE';
 
 export type ObjectType = 'MAP_LINK' | 'OBJECT' | 'DECORATION';
@@ -145,18 +147,20 @@ export interface PendingCombatAction {
   maxDie: number;
 }
 
-export interface CombatState {
+export interface CombatSession {
   isActive: boolean;
   currentTurnPlayerId: string | null;
-  combatBlockId?: string; // Add Block ID to anchor combat to a location
-  turnCount: number; // Track turns for Flee mechanics
+  combatBlockId: string; // The block where this combat is happening
+  turnCount: number;
   phase: CombatPhase;
   pendingAction: PendingCombatAction | null;
   logs: CombatLogEntry[];
-  factionDamage: Record<string, number>; // factionId -> total damage taken
-  fledPlayerIds: string[]; // List of players who fled
-  turnOrder: string[]; // Strict turn order based on Initiative
+  factionDamage: Record<string, number>;
+  fledPlayerIds: string[];
+  turnOrder: string[];
 }
+
+export type GlobalCombatState = Record<string, CombatSession>;
 
 // --------------------------
 
@@ -230,7 +234,7 @@ export type NetworkAction =
   | { type: 'SYNC_PLAYERS'; players: FactionPlayerProfile[] }
   | { type: 'UPDATE_PLAYER_PROFILE'; profile: FactionPlayerProfile }
   | { type: 'CHANGE_FACTION_MAP'; mapId: string }
-  | { type: 'SYNC_COMBAT_STATE'; state: CombatState }
+  | { type: 'SYNC_COMBAT_STATE'; state: GlobalCombatState }
   | { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] }
   | { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage }
   | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] }
