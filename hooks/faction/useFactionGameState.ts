@@ -10,10 +10,12 @@ export const useFactionGameState = (
 ) => {
   const { networkMode, connections, hostConnection, broadcast, sendToHost } = network;
 
+  // 1. 내부 데이터 상태 관리
   const [data, setData] = useState<FactionGameData>({
     ...initialData,
     currentTurn: initialData.currentTurn || 1
   });
+
   const [players, setPlayers] = useState<FactionPlayerProfile[]>([]);
   const [chatMessages, setChatMessages] = useState<FactionChatMessage[]>([]);
   const [myProfile, setMyProfile] = useState<FactionPlayerProfile | null>(null);
@@ -21,16 +23,36 @@ export const useFactionGameState = (
   const [isDataLoaded, setIsDataLoaded] = useState(networkMode !== 'CLIENT');
   const [announcement, setAnnouncement] = useState<{ title: string, message: string } | null>(null);
 
-  // Network Sync Logic
+  // 2. [Host Only] 상위 컴포넌트(App.tsx)에서 파일 로드 등으로 initialData가 변경되면 내부 상태 동기화
+  useEffect(() => {
+    if (networkMode === 'HOST' && initialData) {
+      setData(prev => ({
+        ...prev,
+        ...initialData,
+        currentTurn: prev.currentTurn || initialData.currentTurn || 1
+      }));
+      if (!currentMapId && initialData.maps.length > 0) {
+        setCurrentMapId(initialData.maps[0].id);
+      }
+    }
+  }, [initialData, networkMode]);
+
+  // 3. [Host Only] 데이터 동기화 브로드캐스트 (즉시 전송 + 주기적 전송)
   useEffect(() => {
     if (networkMode === 'HOST') {
+      // 데이터가 변경되거나 새로운 접속자(connections.length)가 생기면 즉시 전송
+      broadcast({ type: 'SYNC_FACTION_GAMEDATA', payload: data });
+      broadcast({ type: 'SYNC_PLAYERS', players: players });
+      broadcast({ type: 'SYNC_FACTION_CHAT', messages: chatMessages });
+
       const interval = setInterval(() => {
         broadcast({ type: 'SYNC_FACTION_GAMEDATA', payload: data });
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [networkMode, broadcast, data]);
+  }, [networkMode, broadcast, data, connections.length]); // connections.length를 추가하여 신규 접속 시 즉시 대응
 
+  // 4. 네트워크 액션 핸들러
   useEffect(() => {
     const handleAction = (msg: any) => {
       if (networkMode === 'HOST') {
@@ -61,14 +83,6 @@ export const useFactionGameState = (
           if (!currentMapId && msg.payload.maps.length > 0) {
             setCurrentMapId(msg.payload.maps[0].id);
           }
-        } else if (msg.type === 'SYNC_GAMEDATA') { // Fallback
-            if (msg.payload.factions) {
-                setData(msg.payload);
-                setIsDataLoaded(true);
-                if (!currentMapId && msg.payload.maps.length > 0) {
-                    setCurrentMapId(msg.payload.maps[0].id);
-                }
-            }
         } else if (msg.type === 'SYNC_PLAYERS') {
           setPlayers(msg.players);
         } else if (msg.type === 'CHANGE_FACTION_MAP') {
@@ -99,16 +113,18 @@ export const useFactionGameState = (
       hostConnection.off('data');
       hostConnection.on('data', handleAction);
     }
-  }, [networkMode, connections, hostConnection, currentMapId, myProfile]);
+  }, [networkMode, connections, hostConnection, currentMapId, myProfile, players, chatMessages, data]);
 
   // Actions
   const handlePlayerJoin = (profile: FactionPlayerProfile) => {
     setMyProfile(profile);
-    setPlayers(prev => [...prev, profile]);
+    setPlayers(prev => {
+        const next = [...prev.filter(p => p.id !== profile.id), profile];
+        if (networkMode === 'HOST') broadcast({ type: 'SYNC_PLAYERS', players: next });
+        return next;
+    });
     if (networkMode === 'CLIENT') {
       sendToHost({ type: 'JOIN_FACTION_GAME', profile });
-    } else if (networkMode === 'HOST') {
-      broadcast({ type: 'SYNC_PLAYERS', players: [...players, profile] });
     }
   };
 
@@ -124,10 +140,8 @@ export const useFactionGameState = (
   };
 
   const handleSendMessage = (text: string, channel: 'TEAM' | 'BLOCK', isAdmin: boolean) => {
-    if (!myProfile) {
-        if (isAdmin) alert("운영자 모드 채팅은 추후 지원됩니다.");
-        return;
-    }
+    if (!myProfile) return;
+    
     const targetId = channel === 'TEAM' ? myProfile.teamId : (myProfile.currentBlockId || '');
     if (channel === 'BLOCK' && !targetId) {
       alert("현재 맵의 블록 위에 있지 않아 지역 채팅을 할 수 없습니다.");

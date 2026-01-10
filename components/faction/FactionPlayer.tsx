@@ -4,6 +4,7 @@ import { FactionGameData, CombatState } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
 import { useFactionGameState } from '../../hooks/faction/useFactionGameState';
 import { useFactionCombat } from '../../hooks/faction/useFactionCombat';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 // Components
 import { FactionSetupModal } from './player/FactionSetupModal';
@@ -17,6 +18,10 @@ import { FactionLoading } from './ui/FactionLoading';
 import { FactionAnnouncement } from './ui/FactionAnnouncement';
 import { FactionTurnOverlay } from './ui/FactionTurnOverlay';
 
+// Icons for Mobile
+import { Menu, MessageSquare } from 'lucide-react';
+import { Modal } from '../common/Modal';
+
 interface FactionPlayerProps {
   data: FactionGameData;
   network: ReturnType<typeof useNetwork>;
@@ -24,6 +29,8 @@ interface FactionPlayerProps {
 }
 
 export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData, network, onExit }) => {
+  const isMobile = useIsMobile();
+  
   // 1. Core State & Network Logic
   const {
     data, setData, players, chatMessages, myProfile, setMyProfile,
@@ -43,6 +50,10 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
   const [adminCombatViewOpen, setAdminCombatViewOpen] = useState(false);
+  
+  // Mobile Specific State
+  const [isMobileLeftSidebarOpen, setIsMobileLeftSidebarOpen] = useState(false);
+  const [isMobileRightSidebarOpen, setIsMobileRightSidebarOpen] = useState(false);
 
   // 4. Derived State
   const currentMap = data.maps.find(m => m.id === currentMapId);
@@ -70,7 +81,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
 
   const showCombatUI = isCombatActiveForView && ((isAdmin && adminCombatViewOpen) || (!isAdmin));
 
-  // 5. Logic Handlers (Movement & Admin)
+  // 5. Logic Handlers
   const handleAdminLogin = () => { setIsAdmin(true); setIsSetupOpen(false); };
 
   const updateAdminPlayer = (updates: Partial<typeof selectedAdminPlayer>) => {
@@ -218,56 +229,136 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
       />
 
       <div className="flex-1 flex overflow-hidden relative">
-        <div className="hidden md:flex">
-          <FactionSidebar
-            data={data}
-            players={players}
-            myProfile={myProfile}
-            isAdmin={isAdmin}
-            selectedPlayerId={selectedPlayerId}
-            onSelectPlayer={setSelectedPlayerId}
-            onUpdateProfile={(updates) => myProfile && broadcastProfileUpdate({ ...myProfile, ...updates })}
-          />
-        </div>
+        {/* Desktop Sidebar */}
+        {!isMobile && (
+            <div className="hidden md:flex">
+                <FactionSidebar
+                    data={data}
+                    players={players}
+                    myProfile={myProfile}
+                    isAdmin={isAdmin}
+                    selectedPlayerId={selectedPlayerId}
+                    onSelectPlayer={setSelectedPlayerId}
+                    onUpdateProfile={(updates) => myProfile && broadcastProfileUpdate({ ...myProfile, ...updates })}
+                />
+            </div>
+        )}
 
+        {/* Main Map View */}
         <div className="flex-1 relative flex flex-col">
-          <FactionMapCanvas
-            currentMap={currentMap}
-            players={players}
-            isAdmin={isAdmin}
-            myProfile={myProfile}
-            onBlockClick={handleBlockClick}
-            factions={data.factions}
-          />
+            <div className="flex-1 overflow-auto flex items-center justify-center p-4">
+                <FactionMapCanvas
+                    currentMap={currentMap}
+                    players={players}
+                    isAdmin={isAdmin}
+                    myProfile={myProfile}
+                    onBlockClick={handleBlockClick}
+                    factions={data.factions}
+                />
+            </div>
 
-          {!isAdmin && !isCombatActiveForView && (
-            <FactionTurnOverlay isVisible={!!isTurnFinished} currentTurn={data.currentTurn || 1} />
-          )}
+            {!isAdmin && !isCombatActiveForView && (
+                <FactionTurnOverlay isVisible={!!isTurnFinished} currentTurn={data.currentTurn || 1} />
+            )}
+
+            {/* Mobile Floating Controls */}
+            {isMobile && (
+                <>
+                    <div className="fixed bottom-6 left-6 z-30 flex flex-col gap-2">
+                        <button 
+                            onClick={() => setIsMobileLeftSidebarOpen(true)}
+                            className="bg-indigo-600 p-3 rounded-full shadow-lg text-white hover:bg-indigo-500 active:scale-95 transition-transform"
+                        >
+                            <Menu size={24} />
+                        </button>
+                    </div>
+                    <div className="fixed bottom-6 right-6 z-30 flex flex-col gap-2">
+                        <button 
+                            onClick={() => setIsMobileRightSidebarOpen(true)}
+                            className="bg-orange-600 p-3 rounded-full shadow-lg text-white hover:bg-orange-500 active:scale-95 transition-transform relative"
+                        >
+                            <MessageSquare size={24} />
+                            {chatMessages.length > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-[#1a1a1a]"></span>}
+                        </button>
+                    </div>
+                </>
+            )}
         </div>
 
-        <div className="hidden md:flex z-20">
-          {isAdmin && selectedAdminPlayer ? (
-            <FactionAdminPanel
-              selectedPlayer={selectedAdminPlayer}
-              onClose={() => setSelectedPlayerId(null)}
-              onUpdatePlayer={updateAdminPlayer}
-              combatActive={!!(selectedAdminPlayer.currentBlockId && activeCombats[selectedAdminPlayer.currentBlockId]?.isActive)}
-              onToggleCombat={() => toggleCombat(selectedAdminPlayer.currentBlockId, true, selectedPlayerId)}
-              onNextTurn={() => resolveTurn(selectedAdminPlayer.currentBlockId || '')}
-              onAdvanceGlobalTurn={advanceGlobalTurn}
-              onSendAnnouncement={sendAdminAnnouncement}
-            />
-          ) : (
-            <FactionChatSidebar
-              data={data}
-              myProfile={myProfile}
-              isAdmin={isAdmin}
-              chatMessages={chatMessages}
-              onSendMessage={(txt, ch) => handleSendMessage(txt, ch, isAdmin)}
-            />
-          )}
-        </div>
+        {/* Desktop Chat/Admin Sidebar */}
+        {!isMobile && (
+            <div className="hidden md:flex z-20">
+                {isAdmin && selectedAdminPlayer ? (
+                    <FactionAdminPanel
+                        selectedPlayer={selectedAdminPlayer}
+                        onClose={() => setSelectedPlayerId(null)}
+                        onUpdatePlayer={updateAdminPlayer}
+                        combatActive={!!(selectedAdminPlayer.currentBlockId && activeCombats[selectedAdminPlayer.currentBlockId]?.isActive)}
+                        onToggleCombat={() => toggleCombat(selectedAdminPlayer.currentBlockId, true, selectedPlayerId)}
+                        onNextTurn={() => resolveTurn(selectedAdminPlayer.currentBlockId || '')}
+                        onAdvanceGlobalTurn={advanceGlobalTurn}
+                        onSendAnnouncement={sendAdminAnnouncement}
+                    />
+                ) : (
+                    <FactionChatSidebar
+                        data={data}
+                        myProfile={myProfile}
+                        isAdmin={isAdmin}
+                        chatMessages={chatMessages}
+                        onSendMessage={(txt, ch) => handleSendMessage(txt, ch, isAdmin)}
+                    />
+                )}
+            </div>
+        )}
       </div>
+
+      {/* Mobile Modals (Portals to Sidebars) */}
+      {isMobile && (
+          <>
+            <Modal isOpen={isMobileLeftSidebarOpen} onClose={() => setIsMobileLeftSidebarOpen(false)} title="진영 현황" maxWidth="max-w-full">
+                <div className="h-[60vh] flex flex-col">
+                    <FactionSidebar 
+                        data={data}
+                        players={players}
+                        myProfile={myProfile}
+                        isAdmin={isAdmin}
+                        selectedPlayerId={selectedPlayerId}
+                        onSelectPlayer={(id) => { 
+                            setSelectedPlayerId(id); 
+                            setIsMobileLeftSidebarOpen(false); 
+                            if(isAdmin && id) setIsMobileRightSidebarOpen(true); 
+                        }}
+                        onUpdateProfile={(updates) => myProfile && broadcastProfileUpdate({ ...myProfile, ...updates })}
+                    />
+                </div>
+            </Modal>
+
+            <Modal isOpen={isMobileRightSidebarOpen} onClose={() => setIsMobileRightSidebarOpen(false)} title={isAdmin && selectedAdminPlayer ? "플레이어 관리" : "채팅"} maxWidth="max-w-full">
+                <div className="h-[60vh] flex flex-col">
+                    {isAdmin && selectedAdminPlayer ? (
+                        <FactionAdminPanel 
+                            selectedPlayer={selectedAdminPlayer}
+                            onClose={() => setSelectedPlayerId(null)}
+                            onUpdatePlayer={updateAdminPlayer}
+                            combatActive={!!(selectedAdminPlayer.currentBlockId && activeCombats[selectedAdminPlayer.currentBlockId]?.isActive)}
+                            onToggleCombat={() => toggleCombat(selectedAdminPlayer.currentBlockId, true, selectedPlayerId)}
+                            onNextTurn={() => resolveTurn(selectedAdminPlayer.currentBlockId || '')}
+                            onAdvanceGlobalTurn={advanceGlobalTurn}
+                            onSendAnnouncement={sendAdminAnnouncement}
+                        />
+                    ) : (
+                        <FactionChatSidebar 
+                            data={data}
+                            myProfile={myProfile}
+                            isAdmin={isAdmin}
+                            chatMessages={chatMessages}
+                            onSendMessage={(txt, ch) => handleSendMessage(txt, ch, isAdmin)}
+                        />
+                    )}
+                </div>
+            </Modal>
+          </>
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { FactionGameData, FactionPlayerProfile, FactionStats } from '../../../types';
-import { Crown, Shield, Users, User, Upload, Lock, Activity, Sword, Shield as ShieldIcon, Zap, Brain } from 'lucide-react';
+import { Crown, Shield, Users, User, Upload, Lock, Activity, Sword, Shield as ShieldIcon, Zap, Brain, Loader2 } from 'lucide-react';
 import { Button } from '../../common/Button';
 import { StatInput } from '../common/StatInput';
 import { generateId, blobToBase64 } from '../../../lib/utils';
@@ -33,7 +33,6 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files?.[0]) {
             try {
-                // Convert to Base64 so it can be sent over network
                 const base64 = await blobToBase64(e.target.files[0]);
                 setSetupAvatar(base64);
             } catch (err) {
@@ -47,8 +46,6 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
         if (!setupTeamId) { alert("팀을 선택해주세요."); return; }
         if (!setupName.trim()) { alert("캐릭터 이름을 입력해주세요."); return; }
   
-        // Calculate Max HP based on Stat
-        // 1: 160, 2: 170, 3: 180, 4: 190, 5: 200
         const calculatedMaxHp = 150 + (setupStats.hp * 10);
 
         const profile: FactionPlayerProfile = {
@@ -58,7 +55,7 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
             factionId: setupFactionId,
             teamId: setupTeamId,
             stats: setupStats,
-            hp: calculatedMaxHp, // Start with Max HP
+            hp: calculatedMaxHp,
             maxHp: calculatedMaxHp,
             inventory: []
         };
@@ -105,6 +102,12 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
                                     <Shield size={16}/> 1. 진영 선택
                                 </h3>
                                 <div className="space-y-3 mb-6">
+                                    {data.factions.length === 0 && (
+                                        <div className="flex flex-col items-center py-10 text-gray-500">
+                                            <Loader2 size={24} className="animate-spin mb-2" />
+                                            <p className="text-xs">진영 정보를 불러오는 중...</p>
+                                        </div>
+                                    )}
                                     {data.factions.map(f => (
                                         <div 
                                             key={f.id}
@@ -127,16 +130,22 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
                                             <Users size={16}/> 2. 팀 선택
                                         </h3>
                                         <div className="space-y-2">
-                                            {selectedFaction.teams.length === 0 && <p className="text-gray-500 italic text-sm">소속된 팀이 없습니다.</p>}
-                                            {selectedFaction.teams.map(t => (
-                                                <button
-                                                    key={t.id}
-                                                    onClick={() => setSetupTeamId(t.id)}
-                                                    className={`w-full text-left p-3 rounded border transition-all ${setupTeamId === t.id ? 'bg-indigo-900/40 border-indigo-500 text-white font-bold' : 'bg-[#2a2a2a] border-[#333] text-gray-300 hover:bg-[#333]'}`}
-                                                >
-                                                    {t.name}
-                                                </button>
-                                            ))}
+                                            {(!selectedFaction.teams || selectedFaction.teams.length === 0) ? (
+                                                <div className="p-4 bg-orange-900/20 border border-orange-500/30 rounded text-center">
+                                                    <p className="text-orange-200 text-xs font-bold mb-1">팀 정보가 없습니다.</p>
+                                                    <p className="text-[10px] text-gray-400 italic">호스트가 팀을 설정하지 않았거나 동기화 중입니다.</p>
+                                                </div>
+                                            ) : (
+                                                selectedFaction.teams.map(t => (
+                                                    <button
+                                                        key={t.id}
+                                                        onClick={() => setSetupTeamId(t.id)}
+                                                        className={`w-full text-left p-3 rounded border transition-all ${setupTeamId === t.id ? 'bg-indigo-900/40 border-indigo-500 text-white font-bold' : 'bg-[#2a2a2a] border-[#333] text-gray-300 hover:bg-[#333]'}`}
+                                                    >
+                                                        {t.name}
+                                                    </button>
+                                                ))
+                                            )}
                                         </div>
                                     </div>
                                 )}
