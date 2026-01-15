@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapObject, Character, ResultType, OutcomeDef, ChatMessage } from '../../types';
 import { rollDice } from '../../lib/game-logic';
 import { getShapeStyle as getShapeStyleLib } from '../../lib/styles';
@@ -59,6 +59,9 @@ export const Player: React.FC<PlayerProps> = ({
   const [copiedId, setCopiedId] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // -- Refs for Interpolation --
+  const remoteTargets = useRef<Record<string, { x: number, y: number, mapId: string }>>({});
+
   // -- Derived Data --
   const currentMap = gameData.maps.find(m => m.id === currentMapId);
   const activeChar = characters.find(c => c.id === activeCharId) || characters[0];
@@ -82,6 +85,62 @@ export const Player: React.FC<PlayerProps> = ({
           }
       }
   });
+
+  // -- Interpolation Loop --
+  useEffect(() => {
+      let animationFrameId: number;
+      const lerp = (start: number, end: number, t: number) => start + (end - start) * t;
+
+      const loop = () => {
+          setCharacters(prev => {
+              let changed = false;
+              const next = prev.map(c => {
+                  // Skip active character (handled by input loop)
+                  if (c.id === activeCharId) return c;
+
+                  const target = remoteTargets.current[c.id];
+                  if (!target) {
+                      // Init target if missing
+                      remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' };
+                      return c;
+                  }
+
+                  // Check Map ID mismatch - Snap immediately
+                  if (c.mapId !== target.mapId) {
+                      changed = true;
+                      return { ...c, x: target.x, y: target.y, mapId: target.mapId };
+                  }
+
+                  // Calculate distance
+                  const dx = target.x - c.x;
+                  const dy = target.y - c.y;
+                  const dist = Math.sqrt(dx*dx + dy*dy);
+
+                  // If very close, snap
+                  if (dist < 1) {
+                      if (c.x !== target.x || c.y !== target.y) {
+                          changed = true;
+                          return { ...c, x: target.x, y: target.y };
+                      }
+                      return c;
+                  }
+
+                  // Lerp (0.2 factor for smooth catchup)
+                  changed = true;
+                  return {
+                      ...c,
+                      x: lerp(c.x, target.x, 0.2),
+                      y: lerp(c.y, target.y, 0.2)
+                  };
+              });
+              return changed ? next : prev;
+          });
+          animationFrameId = requestAnimationFrame(loop);
+      };
+      
+      animationFrameId = requestAnimationFrame(loop);
+      return () => cancelAnimationFrame(animationFrameId);
+  }, [activeCharId]);
 
   // -- Network Logic Sync --
 
@@ -156,10 +215,8 @@ export const Player: React.FC<PlayerProps> = ({
                     }]);
                     break;
                 case 'REQUEST_MOVE_CHAR':
-                    // Update Local State
-                    setCharacters(prev => prev.map(c => 
-                        c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
-                    ));
+                    // Update Target Ref (Interpolated)
+                    remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
                     // Broadcast Delta immediately to others
                     broadcast({ type: 'ON_MOVE_CHAR', charId: data.charId, x: data.x, y: data.y, mapId: data.mapId });
                     break;
@@ -170,14 +227,18 @@ export const Player: React.FC<PlayerProps> = ({
                 const { currentMapId: sMap, characters: sChars, interactionResult: sRes, chatMessages: sChat } = data.payload;
                 setCurrentMapId(sMap);
                 setCharacters(sChars); // Full sync overwrites
+                
+                // Sync Interpolation Targets
+                sChars.forEach((c: Character) => {
+                    remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' };
+                });
+
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
                 setIsDataLoaded(true);
             } else if (data.type === 'ON_MOVE_CHAR') {
-                // Delta Update for Movement
-                setCharacters(prev => prev.map(c => 
-                    c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
-                ));
+                // Delta Update for Movement (Interpolated)
+                remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
             } else if (data.type === 'SYNC_GAMEDATA') {
                 setGameData(data.payload);
                 setIsDataLoaded(true);
@@ -406,7 +467,7 @@ export const Player: React.FC<PlayerProps> = ({
                 {visibleCharacters.map(char => (
                     <div
                         key={char.id}
-                        className={`absolute flex flex-col items-center justify-center pointer-events-none`}
+                        className={`absolute flex flex-col items-center justify-center pointer-events-none transition-transform will-change-transform`}
                         style={{ left: char.x, top: char.y, width: CHAR_SIZE, height: CHAR_SIZE, zIndex: 50 }}
                     >
                         <div className="absolute -top-6 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap backdrop-blur-sm border border-white/20 shadow-sm z-50">

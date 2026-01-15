@@ -63,6 +63,9 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
   const requestRef = useRef<number>(0);
   const lastSyncTime = useRef<number>(0);
   const stateRef = useRef({ characters, activeCharId, currentMapId });
+  
+  // Ref for Interpolation Targets
+  const remoteTargets = useRef<Record<string, { x: number, y: number, mapId: string }>>({});
 
   // -- Derived Data --
   const currentMap = gameData.maps.find(m => m.id === currentMapId);
@@ -133,8 +136,8 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                     setChatMessages(prev => [...prev, { id: generateId(), senderName: data.senderName, text: data.text, timestamp: Date.now() }]);
                     break;
                 case 'REQUEST_MOVE_CHAR':
-                    // Update Local
-                    setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c));
+                    // Update Target Ref
+                    remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
                     // Broadcast Delta
                     broadcast({ type: 'ON_MOVE_CHAR', charId: data.charId, x: data.x, y: data.y, mapId: data.mapId });
                     break;
@@ -144,14 +147,18 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                 const { currentMapId: sMap, characters: sChars, interactionResult: sRes, chatMessages: sChat } = data.payload;
                 setCurrentMapId(sMap);
                 setCharacters(sChars);
+                
+                // Sync Interpolation Targets
+                sChars.forEach((c: Character) => {
+                    remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' };
+                });
+
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
                 setIsDataLoaded(true);
             } else if (data.type === 'ON_MOVE_CHAR') {
                 // Delta Update
-                setCharacters(prev => prev.map(c => 
-                    c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c
-                ));
+                remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
             } else if (data.type === 'SYNC_GAMEDATA') {
                 setGameData(data.payload);
                 setIsDataLoaded(true);
@@ -233,48 +240,87 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
           return;
       }
       
+      const { characters: currentChars, activeCharId: currentActiveId, currentMapId: currentMap } = stateRef.current;
+      const lerp = (start: number, end: number, t: number) => start + (end - start) * t;
+      let hasChanges = false;
+
+      // 1. Input Logic (Active Character)
       const inputs = inputRef.current;
-      if (inputs.w || inputs.a || inputs.s || inputs.d) {
-          const { characters: currentChars, activeCharId: currentActiveId, currentMapId: currentMap } = stateRef.current;
+      const charIndex = currentChars.findIndex(c => c.id === currentActiveId);
+      
+      if (charIndex !== -1 && (inputs.w || inputs.a || inputs.s || inputs.d)) {
+          const char = currentChars[charIndex];
+          let dx = 0;
+          let dy = 0;
           
-          const charIndex = currentChars.findIndex(c => c.id === currentActiveId);
-          if (charIndex !== -1) {
-              const char = currentChars[charIndex];
-              let dx = 0;
-              let dy = 0;
+          if (inputs.w) dy -= MOVE_SPEED;
+          if (inputs.s) dy += MOVE_SPEED;
+          if (inputs.a) dx -= MOVE_SPEED;
+          if (inputs.d) dx += MOVE_SPEED;
+
+          if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
+
+          if (dx !== 0 || dy !== 0) {
+              const newX = Math.max(0, Math.min(1200 - CHAR_SIZE, char.x + dx));
+              const newY = Math.max(0, Math.min(800 - CHAR_SIZE, char.y + dy));
               
-              if (inputs.w) dy -= MOVE_SPEED;
-              if (inputs.s) dy += MOVE_SPEED;
-              if (inputs.a) dx -= MOVE_SPEED;
-              if (inputs.d) dx += MOVE_SPEED;
+              if (newX !== char.x || newY !== char.y) {
+                  currentChars[charIndex] = { ...char, x: newX, y: newY, mapId: currentMap };
+                  hasChanges = true;
 
-              if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
-
-              if (dx !== 0 || dy !== 0) {
-                  const newX = Math.max(0, Math.min(1200 - CHAR_SIZE, char.x + dx));
-                  const newY = Math.max(0, Math.min(800 - CHAR_SIZE, char.y + dy));
-                  
-                  if (newX !== char.x || newY !== char.y) {
-                      const newChars = [...currentChars];
-                      newChars[charIndex] = { ...char, x: newX, y: newY, mapId: currentMap };
-                      
-                      setCharacters(newChars);
-                      stateRef.current.characters = newChars;
-
-                      const now = Date.now();
-                      if (now - lastSyncTime.current > 100) {
-                          if (networkMode === 'CLIENT') {
-                              sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
-                          } else if (networkMode === 'HOST') {
-                              // Host Local Move -> Broadcast Delta
-                              broadcast({ type: 'ON_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
-                          }
-                          lastSyncTime.current = now;
+                  const now = Date.now();
+                  if (now - lastSyncTime.current > 50) {
+                      if (networkMode === 'CLIENT') {
+                          sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
+                      } else if (networkMode === 'HOST') {
+                          broadcast({ type: 'ON_MOVE_CHAR', charId: currentActiveId, x: newX, y: newY, mapId: currentMap });
                       }
+                      lastSyncTime.current = now;
                   }
               }
           }
       }
+
+      // 2. Interpolation Logic (Other Characters)
+      currentChars.forEach((c, idx) => {
+          if (c.id === currentActiveId) return; // Skip active
+
+          const target = remoteTargets.current[c.id];
+          if (!target) return;
+
+          // Map Mismatch -> Snap
+          if (c.mapId !== target.mapId) {
+              currentChars[idx] = { ...c, x: target.x, y: target.y, mapId: target.mapId };
+              hasChanges = true;
+              return;
+          }
+
+          // Interpolate
+          const dx = target.x - c.x;
+          const dy = target.y - c.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+
+          if (dist > 0.1) {
+              // Snap if very close
+              if (dist < 1) {
+                  currentChars[idx] = { ...c, x: target.x, y: target.y };
+              } else {
+                  currentChars[idx] = { 
+                      ...c, 
+                      x: lerp(c.x, target.x, 0.2), 
+                      y: lerp(c.y, target.y, 0.2) 
+                  };
+              }
+              hasChanges = true;
+          }
+      });
+
+      if (hasChanges) {
+          const newChars = [...currentChars]; // Create new array ref
+          setCharacters(newChars);
+          stateRef.current.characters = newChars;
+      }
+
       requestRef.current = requestAnimationFrame(animate);
   }, [interactionResult, networkMode, sendToHost, broadcast]);
 
