@@ -124,9 +124,9 @@ export const usePlayerMovement = ({
                     // Update React State
                     setCharacters(newCharacters);
                     
-                    // Throttled Network Sync (100ms for optimization)
+                    // Throttled Network Sync (50ms for smoother movement)
                     const now = Date.now();
-                    if (now - lastSyncTime.current > 100) {
+                    if (now - lastSyncTime.current > 50) {
                         // Call action regardless of mode, let parent handle Host broadcasting
                         state.onSendMoveAction(state.activeCharId, newX, newY, state.currentMapId);
                         lastSyncTime.current = now;

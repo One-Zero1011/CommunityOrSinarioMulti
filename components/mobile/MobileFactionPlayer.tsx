@@ -1,8 +1,3 @@
-
-
-
-
-
 import React, { useState, useEffect } from 'react';
 import { FactionGameData, FactionPlayerProfile, GlobalCombatState, CombatSession, FactionMap, FactionChatMessage, CombatLogEntry } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
@@ -362,10 +357,11 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
     }
 
     // 2. Resume Paused Combats
-    const newCombatState = { ...combatState };
+    const newCombatState: GlobalCombatState = { ...combatState };
     let combatUpdated = false;
 
-    Object.keys(newCombatState).forEach(key => {
+    Object.keys(newCombatState).forEach((k) => {
+        const key = k as string;
         const session = newCombatState[key];
         // Check for paused session: Active but no current player
         if (session.isActive && session.currentTurnPlayerId === null) {
@@ -374,7 +370,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
             let nextPlayerId = null;
             
             // Find first valid player in turnOrder
-            for (const pid of turnOrder) {
+            for (const pidRaw of turnOrder) {
+                const pid = pidRaw as string;
                 const p = players.find(pl => pl.id === pid);
                 if (p && p.hp > 0 && p.currentBlockId === key && !session.fledPlayerIds.includes(p.id)) {
                     nextPlayerId = pid;
@@ -387,7 +384,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
                 newCombatState[key] = {
                     ...session,
                     currentTurnPlayerId: nextPlayerId,
-                    logs: [...session.logs, { id: generateId(), timestamp: Date.now(), text: `🔄 전체 턴 경과! 전투 ${session.turnCount}라운드 시작. (${nextPlayer?.name}의 턴)`, type: 'SYSTEM' }]
+                    logs: [...session.logs, { id: generateId(), timestamp: Date.now(), text: `🔄 전체 턴 경과! 전투 ${session.turnCount}라운드 시작. (${nextPlayer?.name}의 차례)`, type: 'SYSTEM' }]
                 };
                 combatUpdated = true;
             } else {
@@ -484,7 +481,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   
   const toggleCombat = () => {
       let combatLocId: string | undefined;
-      if (isAdmin && selectedPlayerId) {
+      if (isAdmin && selectedAdminPlayer) {
           const targetPlayer = players.find(p => p.id === selectedPlayerId);
           combatLocId = targetPlayer?.currentBlockId;
       } else {
@@ -629,7 +626,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
 
   const handleCombatAction = (type: 'ATTACK' | 'HEAL' | 'FLEE', targetId: string) => {
       if (!myProfile) return;
-      const blockId = myProfile.currentBlockId;
+      const source = myProfile;
+      const blockId = source.currentBlockId;
       if (!blockId) return;
 
       const session = combatState[blockId];
@@ -639,23 +637,23 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       if (!target && type !== 'FLEE') return;
 
       if (type === 'HEAL' && target) {
-          const { success, checkRoll, checkThreshold, healAmount, healDie } = rollFactionHeal(myProfile.stats.spirit);
+          const { success, checkRoll, checkThreshold, healAmount, healDie } = rollFactionHeal(source.stats.spirit);
           let logText = "";
           if (success) {
                const newTarget = { ...target, hp: Math.min(target.maxHp, target.hp + healAmount) };
                broadcastProfileUpdate(newTarget);
-               logText = `✨ [${myProfile.name}] 치유 성공! (1D20=${checkRoll} > ${checkThreshold}) ➔ [${target.name}] +${healAmount} (1D${healDie})`;
+               logText = `✨ [${source.name}] 치유 성공! (1D20=${checkRoll} > ${checkThreshold}) ➔ [${target.name}] +${healAmount} (1D${healDie})`;
           } else { 
-               logText = `💦 [${myProfile.name}] 치유 실패... (1D20=${checkRoll} ≤ ${checkThreshold})`; 
+               logText = `💦 [${source.name}] 치유 실패... (1D20=${checkRoll} ≤ ${checkThreshold})`; 
           }
           const newLog: CombatLogEntry = { id: generateId(), timestamp: Date.now(), text: logText, type: 'HEAL' };
           resolveTurn(blockId, [newLog]);
 
       } else if (type === 'ATTACK' && target) {
-          const { roll, maxDie } = rollFactionAttack(myProfile.stats.attack);
+          const { roll, maxDie } = rollFactionAttack(source.stats.attack);
           const newSession: CombatSession = {
-              ...session, phase: 'RESPONSE', pendingAction: { type: 'ATTACK', sourceId: myProfile.id, targetId: target.id, damageValue: roll, maxDie },
-              logs: [...session.logs, { id: generateId(), timestamp: Date.now(), text: `⚔️ [${myProfile.name}] 공격 ➔ [${target.name}] 데미지 ${roll} (1D${maxDie})! 대응하세요!`, type: 'ATTACK' }]
+              ...session, phase: 'RESPONSE', pendingAction: { type: 'ATTACK', sourceId: source.id, targetId: target.id, damageValue: roll, maxDie },
+              logs: [...session.logs, { id: generateId(), timestamp: Date.now(), text: `⚔️ [${source.name}] 공격 ➔ [${target.name}] 데미지 ${roll} (1D${maxDie})! 대응하세요!`, type: 'ATTACK' }]
           };
           const newGlobalState = { ...combatState, [blockId]: newSession };
           syncCombatState(newGlobalState);
@@ -664,24 +662,61 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           const { success, roll, threshold } = rollFactionFlee(session.turnCount);
           let logText = "";
           let extraLog: CombatLogEntry;
+          
           if (success) {
-              logText = `💨 [${myProfile.name}] 전투 이탈 성공! (1D20=${roll} > ${threshold})`;
+              logText = `💨 [${source.name}] 전투 이탈 성공! (1D20=${roll} > ${threshold})`;
               extraLog = { id: generateId(), timestamp: Date.now(), text: logText, type: 'FLEE' };
-              // Simple handling for now: Mark fled in logic in resolveTurn via special flag or manual session update
-              // To be safe, manual update here:
-              const fledSession = { ...session, fledPlayerIds: [...session.fledPlayerIds, myProfile.id], logs: [...session.logs, extraLog] };
-              // We need to resolveTurn next
-              const newGlobalState = { ...combatState, [blockId]: fledSession };
-              // Cannot call resolveTurn easily with state update race condition.
-              // Just sync for now, players will see they fled.
-              // In reality, next player needs to go.
-              // Let's assume resolveTurn will work if we wait or pass params.
-              // For robustness in this fix, assume Flee just logs it and adds to list, and user must wait or Admin forces next turn if stuck.
-              // Or better: call resolveTurn with updated Fled list?
-              // Let's skip perfection and just sync.
-              syncCombatState(newGlobalState);
+              
+              const newSession = { ...session, fledPlayerIds: [...session.fledPlayerIds, source.id] };
+              // Optimistic update for calculation
+              
+              // --- Logic to find next player (Duplicated from resolveTurn due to sync issues if calling direct) ---
+              const { turnOrder } = newSession;
+              let nextIdx = turnOrder.indexOf(newSession.currentTurnPlayerId || '');
+              let nextPlayerId = null;
+              let loops = 0;
+              let nextTurnCount = newSession.turnCount;
+              let found = false;
+              let isRoundOver = false;
+              
+              while (!found && loops < turnOrder.length + 1) {
+                  nextIdx = (nextIdx + 1) % turnOrder.length;
+                  if (nextIdx === 0) { nextTurnCount++; isRoundOver = true; }
+                  const pid = turnOrder[nextIdx];
+                  const player = players.find(p => p.id === pid);
+                  if (player && player.hp > 0 && player.currentBlockId === blockId && !newSession.fledPlayerIds.includes(player.id)) {
+                      nextPlayerId = pid; found = true;
+                  }
+                  loops++;
+              }
+              
+               if (!found || !nextPlayerId) { 
+                   endCombat(blockId, null, null, "전투원 없음 (전원 불능/도주)"); 
+                   return; 
+               }
+               
+               if (isRoundOver) {
+                   if (nextTurnCount > 5) {
+                       checkCombatVictory(blockId, { ...newSession, turnCount: nextTurnCount });
+                       return;
+                   }
+                   const finalSession: CombatSession = {
+                       ...newSession, currentTurnPlayerId: null, turnCount: nextTurnCount, phase: 'ACTION', pendingAction: null,
+                       logs: [...newSession.logs, extraLog, { id: generateId(), timestamp: Date.now(), text: `⏳ 라운드 종료. 전체 턴(Global Turn) 대기 중...`, type: 'SYSTEM' }]
+                   };
+                   syncCombatState({ ...combatState, [blockId]: finalSession });
+
+               } else {
+                   const nextPlayer = players.find(p => p.id === nextPlayerId);
+                   const finalSession: CombatSession = {
+                       ...newSession, currentTurnPlayerId: nextPlayerId, turnCount: nextTurnCount, phase: 'ACTION', pendingAction: null,
+                       logs: [...newSession.logs, extraLog, { id: generateId(), timestamp: Date.now(), text: `⏩ ${nextPlayer?.name}의 차례 (Round ${nextTurnCount})`, type: 'SYSTEM' }]
+                   };
+                   syncCombatState({ ...combatState, [blockId]: finalSession });
+               }
+
           } else { 
-              logText = `🚫 [${myProfile.name}] 도주 실패... (1D20=${roll} ≤ ${threshold})`; 
+              logText = `🚫 [${source.name}] 도주 실패... (1D20=${roll} ≤ ${threshold})`; 
               extraLog = { id: generateId(), timestamp: Date.now(), text: logText, type: 'FLEE' };
               resolveTurn(blockId, [extraLog]);
           }
@@ -689,10 +724,10 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   };
 
   const handleCombatResponse = (type: 'DEFEND' | 'COUNTER' | 'COVER' | 'HEAL' | 'FLEE', responseTargetId?: string) => {
-      // (Similar Logic to FactionPlayer.tsx - duplicated for brevity in prompt context but fully implemented in file content)
       if (!myProfile) return;
       const blockId = myProfile.currentBlockId;
       if (!blockId) return;
+
       const session = combatState[blockId];
       if (!session || !session.pendingAction) return;
 
@@ -719,24 +754,29 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           const res = applyDamage(finalDamage, responder);
           damageUpdates[res.fid] = (damageUpdates[res.fid] || 0) + res.damageDealt;
           logText = `🛡️ [${responder.name}] 방어! (1D${maxDie}=${roll}) ➔ ${pending.damageValue} 중 ${finalDamage} 피해 받음.`;
+          
       } else if (type === 'COUNTER') {
           finalDamage = pending.damageValue;
           const res1 = applyDamage(finalDamage, responder);
           damageUpdates[res1.fid] = (damageUpdates[res1.fid] || 0) + res1.damageDealt;
+          
           const { roll, maxDie } = rollFactionAttack(responder.stats.attack);
           const res2 = applyDamage(roll, attacker);
           damageUpdates[res2.fid] = (damageUpdates[res2.fid] || 0) + res2.damageDealt;
           logText = `⚔️ [${responder.name}] 반격! ${pending.damageValue} 피해 받고 ➔ [${attacker.name}]에게 ${roll} (1D${maxDie}) 되돌려줌!`;
+          
       } else if (type === 'COVER') {
           const { roll, maxDie } = rollFactionDefend(responder.stats.defense);
           finalDamage = Math.max(0, pending.damageValue - roll);
           const res = applyDamage(finalDamage, responder);
           damageUpdates[res.fid] = (damageUpdates[res.fid] || 0) + res.damageDealt;
           logText = `🛡️ [${responder.name}] 대리 방어! [${originalTarget.name}] 대신 맞음. (1D${maxDie}=${roll}) ➔ ${finalDamage} 피해.`;
+          
       } else if (type === 'HEAL') {
           finalDamage = pending.damageValue;
           const res1 = applyDamage(finalDamage, originalTarget);
           damageUpdates[res1.fid] = (damageUpdates[res1.fid] || 0) + res1.damageDealt;
+          
           const healTarget = players.find(p => p.id === responseTargetId) || responder;
           const { success, checkRoll, healAmount } = rollFactionHeal(responder.stats.spirit);
           if (success) {

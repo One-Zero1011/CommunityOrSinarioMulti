@@ -1,13 +1,4 @@
 
-
-
-
-
-
-
-
-
-
 export type ResultType = 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'CRITICAL_FAILURE';
 
 export type ObjectType = 'MAP_LINK' | 'OBJECT' | 'DECORATION';
@@ -63,6 +54,7 @@ export interface GameData {
   title: string;
   maps: MapScene[];
   startMapId: string;
+  adminKey?: string; // Added for Admin Mode
 }
 
 // --- Faction Mode Types ---

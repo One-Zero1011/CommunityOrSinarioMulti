@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GameData, MapObject, Character, ChatMessage, ResultType, OutcomeDef } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
@@ -54,6 +55,7 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
   const [interactionResult, setInteractionResult] = useState<any>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [scale, setScale] = useState(1);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // -- Refs --
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -162,8 +164,17 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
   }, [networkMode, connections, hostConnection, currentMap, characters, gameData]);
 
   // -- Logic Handlers --
+  const handleAdminLogin = (key: string) => {
+    if (gameData.adminKey && key === gameData.adminKey) {
+        setIsAdmin(true);
+        alert("운영자 권한을 획득했습니다.");
+    } else {
+        alert("운영자 키가 올바르지 않습니다.");
+    }
+  };
+
   const handleSendMessage = (text: string) => {
-      const senderName = networkMode === 'HOST' ? 'GM (Host)' : activeChar.name;
+      const senderName = networkMode === 'HOST' ? (isAdmin ? 'GM (Host)' : 'Host') : (isAdmin ? 'GM' : activeChar.name);
       if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_CHAT', text, senderName });
       else setChatMessages(prev => [...prev, { id: generateId(), senderName, text, timestamp: Date.now() }]);
   };
@@ -281,7 +292,7 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
 
   return (
     <div className="flex flex-col h-screen bg-[#2e2e2e] text-gray-100 overflow-hidden select-none">
-      <PlayerHUD currentMapName={currentMap?.name || ''} onExit={onExit} />
+      <PlayerHUD currentMapName={currentMap?.name || ''} onExit={onExit} isAdmin={isAdmin} />
       
       {/* Map Container */}
       <div ref={mapContainerRef} className="flex-1 relative overflow-hidden bg-[#1a1a1a] flex items-center justify-center">
@@ -359,11 +370,13 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({
                 characters={characters}
                 activeCharId={activeCharId}
                 chatMessages={chatMessages}
+                isAdmin={isAdmin}
                 onSelectChar={(id) => { setActiveCharId(id); setIsSidebarOpen(false); }}
                 onAddChar={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ADD_CHAR' }) : handleAddCharacterLogic()}
                 onUpdateChar={(id, updates) => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_CHAR_UPDATE', charId: id, updates }) : setCharacters(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))}
                 onDeleteChar={(id) => { if(networkMode !== 'CLIENT') { setCharacters(prev => prev.filter(c => c.id !== id)); } }}
                 onSendMessage={handleSendMessage}
+                onAdminLogin={handleAdminLogin}
             />
          </div>
       </Modal>

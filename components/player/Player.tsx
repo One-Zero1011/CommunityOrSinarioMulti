@@ -57,6 +57,7 @@ export const Player: React.FC<PlayerProps> = ({
     targetMapName?: string;
   } | null>(null);
   const [copiedId, setCopiedId] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // -- Derived Data --
   const currentMap = gameData.maps.find(m => m.id === currentMapId);
@@ -198,8 +199,17 @@ export const Player: React.FC<PlayerProps> = ({
 
   // -- Logic Handlers --
 
+  const handleAdminLogin = (key: string) => {
+      if (gameData.adminKey && key === gameData.adminKey) {
+          setIsAdmin(true);
+          alert("운영자 권한을 획득했습니다.");
+      } else {
+          alert("운영자 키가 올바르지 않습니다.");
+      }
+  };
+
   const handleSendMessage = (text: string) => {
-      const senderName = networkMode === 'HOST' ? 'GM (Host)' : activeChar.name;
+      const senderName = networkMode === 'HOST' ? (isAdmin ? 'GM (Host)' : 'Host') : (isAdmin ? 'GM' : activeChar.name);
       if (networkMode === 'CLIENT') {
           sendToHost({ type: 'REQUEST_CHAT', text, senderName });
       } else {
@@ -321,7 +331,7 @@ export const Player: React.FC<PlayerProps> = ({
   return (
     <div className="flex h-screen bg-[#2e2e2e] text-gray-100 overflow-hidden font-sans">
       <div className="flex-1 flex flex-col relative overflow-hidden">
-        <PlayerHUD currentMapName={currentMap?.name || 'Unknown'} onExit={onExit} />
+        <PlayerHUD currentMapName={currentMap?.name || 'Unknown'} onExit={onExit} isAdmin={isAdmin} />
         
         {/* Network Status Bar */}
         {networkMode !== 'SOLO' && (
@@ -421,11 +431,13 @@ export const Player: React.FC<PlayerProps> = ({
         characters={characters}
         activeCharId={activeCharId}
         chatMessages={chatMessages}
+        isAdmin={isAdmin}
         onSelectChar={setActiveCharId}
         onAddChar={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ADD_CHAR' }) : handleAddCharacterLogic()}
         onUpdateChar={(id, updates) => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_CHAR_UPDATE', charId: id, updates }) : setCharacters(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))}
         onDeleteChar={handleDeleteCharacter}
         onSendMessage={handleSendMessage}
+        onAdminLogin={handleAdminLogin}
       />
 
       {interactionResult && (

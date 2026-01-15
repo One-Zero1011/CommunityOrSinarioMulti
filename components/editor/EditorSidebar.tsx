@@ -1,7 +1,7 @@
 
 import React, { useRef, useState } from 'react';
 import { GameData } from '../../types';
-import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle } from 'lucide-react';
+import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle, Key } from 'lucide-react';
 import { exportGameDataToZip, exportGameDataToExcel, loadGameDataFromFile } from '../../lib/file-storage';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { Button } from '../common/Button';
@@ -166,8 +166,25 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         maxWidth="max-w-sm"
         footer={<Button variant="primary" onClick={() => setIsSettingsOpen(false)}>확인</Button>}
       >
-        <div className="space-y-4">
+        <div className="space-y-6">
+          {/* Admin Key Setting */}
           <div>
+             <label className="block text-sm font-bold text-gray-300 mb-2 flex items-center gap-2">
+                <Key size={14} className="text-orange-400"/> 운영자 암호 (Admin Key)
+             </label>
+             <input 
+                type="text" 
+                value={data.adminKey || ''}
+                onChange={(e) => onSave({ ...data, adminKey: e.target.value })}
+                placeholder="플레이 시 사용할 운영자 암호"
+                className="w-full bg-[#383838] border border-[#555] rounded px-3 py-2 text-sm text-white focus:border-orange-500 outline-none"
+             />
+             <p className="text-xs text-gray-500 mt-2">
+               * 게임 플레이 시 이 암호를 입력하면 운영자 권한을 얻을 수 있습니다.
+             </p>
+          </div>
+
+          <div className="border-t border-[#444] pt-4">
              <label className="block text-sm font-bold text-gray-300 mb-2">자동 저장 간격</label>
              <div className="grid grid-cols-1 gap-2">
                {[
