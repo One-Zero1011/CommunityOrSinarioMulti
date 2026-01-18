@@ -10,6 +10,8 @@ export interface OutcomeDef {
   hpChange: number;
   itemDrop?: string;
   targetMapId?: string;
+  revealObjectId?: string; // ID of object to show
+  hideObjectId?: string;   // ID of object to hide
 }
 
 export interface ProbabilityProfile {
@@ -39,7 +41,10 @@ export interface MapObject {
   description?: string;
   useProbability?: boolean;
   targetMapId?: string;
+  revealObjectId?: string; // For non-dice interaction
+  hideObjectId?: string;   // For non-dice interaction
   data?: ProbabilityProfile;
+  hidden?: boolean; // Visibility control
 }
 
 export interface MapScene {
@@ -50,11 +55,23 @@ export interface MapScene {
   bgm?: string;
 }
 
+export interface CustomStatDef {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  defaultValue: number;
+  isHpBound?: boolean; // Whether this stat determines Max HP
+  hpWeight?: number;   // How much HP per stat point
+}
+
 export interface GameData {
   title: string;
   maps: MapScene[];
   startMapId: string;
-  adminKey?: string; // Added for Admin Mode
+  adminKey?: string; 
+  customStats?: CustomStatDef[]; // Definitions for custom character stats
+  baseHp?: number; // Base HP for character creation logic
 }
 
 // --- Faction Mode Types ---
@@ -121,7 +138,62 @@ export interface FactionPlayerProfile {
   lastActionTurn?: number; // The turn number when the last move occurred
 }
 
-// Combat Types
+// --- Combat Mode Types ---
+
+export interface StatImpact {
+  targetStatId: string;
+  operation: 'SUBTRACT' | 'ADD'; // e.g. SUBTRACT for damage, ADD for heal
+}
+
+export interface WeightedValue {
+  value: number;  // The resulting value (e.g. damage 100)
+  weight: number; // Probability weight (relative to total weight)
+}
+
+export interface CombatStatDef {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  defaultValue: number;
+  valueMapping?: Record<number, WeightedValue[]>; // Maps specific stat value to possible outcomes
+  impacts?: StatImpact[]; // Effects on other stats when rolled
+}
+
+export interface CombatRules {
+  initiativeStatId: string; // The stat used to determine turn order (e.g. Agility)
+  deathStatId?: string; // The stat that determines death when <= 0
+  turnOrder: 'INDIVIDUAL' | 'TEAM_SUM'; // Individual sort or Team Total Sum sort
+  
+  // Reaction Rules
+  allowDodge: boolean; // Enables 'Dodge' phase before reaction
+  dodgeStatId?: string; // Stat used for Dodge roll
+  
+  allowDefend: boolean; 
+  defenseStatId?: string; // Stat used for Defend roll
+
+  allowCounter: boolean; 
+  counterStatId?: string; // Stat used for Counter roll
+
+  allowCover: boolean; 
+  coverStatId?: string; // Stat used by Ally for Cover roll
+}
+
+export interface CombatGameData {
+  title: string;
+  stats: CombatStatDef[];
+  rules?: CombatRules;
+}
+
+export interface CombatEntity {
+  id: string;
+  name: string;
+  team: 'A' | 'B';
+  stats: Record<string, number>;
+  hp?: number; // Optional derived HP for display
+}
+
+// --- Combat Logic Types ---
 export interface CombatLogEntry {
   id: string;
   timestamp: number;
@@ -167,6 +239,7 @@ export interface Character {
   mapId?: string;
   x: number;
   y: number;
+  stats?: Record<string, number>; // Actual values for defined customStats
 }
 
 export interface LogEntry {
@@ -217,10 +290,11 @@ export type NetworkAction =
   | { type: 'REQUEST_ACTION'; action: 'MOVE_MAP'; targetMapId: string }
   | { type: 'REQUEST_ACTION'; action: 'CLOSE_MODAL' }
   | { type: 'REQUEST_CHAR_UPDATE'; charId: string; updates: Partial<Character> }
-  | { type: 'REQUEST_ADD_CHAR' }
+  | { type: 'REQUEST_ADD_CHAR'; character: Character }
   | { type: 'REQUEST_CHAT'; text: string; senderName: string }
   | { type: 'REQUEST_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string }
   | { type: 'ON_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string }
+  | { type: 'REQUEST_TOGGLE_OBJECT_VISIBILITY'; mapId: string; objectId: string; hidden: boolean }
   // Faction Mode Actions
   | { type: 'JOIN_FACTION_GAME'; profile: FactionPlayerProfile }
   | { type: 'SYNC_PLAYERS'; players: FactionPlayerProfile[] }

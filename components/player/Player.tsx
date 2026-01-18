@@ -1,15 +1,18 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapObject, Character, ResultType, OutcomeDef, ChatMessage } from '../../types';
-import { rollDice } from '../../lib/game-logic';
+import { rollDice, getResultColor, getResultLabel } from '../../lib/game-logic';
 import { getShapeStyle as getShapeStyleLib } from '../../lib/styles';
 import { generateId } from '../../lib/utils';
 import { PlayerHUD } from './PlayerHUD';
 import { PlayerSidebar } from './PlayerSidebar';
 import { InteractionModal } from './InteractionModal';
-import { Wifi, Copy, Check, User } from 'lucide-react';
+import { CharacterSetupModal } from './CharacterSetupModal';
+import { Wifi, Copy, Check, User, Megaphone, EyeOff } from 'lucide-react';
 import { usePlayerMovement } from '../../hooks/usePlayerMovement';
 import { useNetwork } from '../../hooks/useNetwork';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
 
 interface PlayerProps {
   gameData: GameData;
@@ -32,20 +35,9 @@ export const Player: React.FC<PlayerProps> = ({
   const [gameData, setGameData] = useState<GameData>(initialGameData);
   const [isDataLoaded, setIsDataLoaded] = useState(networkMode !== 'CLIENT');
   const [currentMapId, setCurrentMapId] = useState(initialGameData.startMapId || initialGameData.maps[0]?.id);
-  const [characters, setCharacters] = useState<Character[]>([
-    { 
-        id: 'char_1', 
-        name: '탐사자 1', 
-        desc: '', 
-        hp: 100, 
-        maxHp: 100, 
-        inventory: [],
-        mapId: initialGameData.startMapId || initialGameData.maps[0]?.id,
-        x: 100,
-        y: 400
-    }
-  ]);
-  const [activeCharId, setActiveCharId] = useState('char_1');
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [activeCharId, setActiveCharId] = useState('');
+  const [isCharSetupOpen, setIsCharSetupOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [interactionResult, setInteractionResult] = useState<{
     hasRoll: boolean;
@@ -58,29 +50,41 @@ export const Player: React.FC<PlayerProps> = ({
   } | null>(null);
   const [copiedId, setCopiedId] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [announcement, setAnnouncement] = useState<{title: string, message: string} | null>(null);
 
-  // -- Refs for Interpolation --
+  // -- Refs --
   const remoteTargets = useRef<Record<string, { x: number, y: number, mapId: string }>>({});
+  const stateRef = useRef({ characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId });
+
+  useEffect(() => {
+      stateRef.current = { characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId };
+  }, [characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId]);
 
   // -- Derived Data --
   const currentMap = gameData.maps.find(m => m.id === currentMapId);
   const activeChar = characters.find(c => c.id === activeCharId) || characters[0];
   const visibleCharacters = characters.filter(c => c.mapId === currentMapId || (!c.mapId && currentMapId === gameData.startMapId));
+  const visibleObjects = currentMap?.objects.filter(obj => isAdmin || !obj.hidden) || [];
+
+  // -- Auto Map Switch when forced by Admin --
+  useEffect(() => {
+      if (activeChar && activeChar.mapId && activeChar.mapId !== currentMapId) {
+          setCurrentMapId(activeChar.mapId);
+      }
+  }, [activeChar?.mapId, activeCharId, currentMapId]);
 
   // -- Hooks --
-  
   usePlayerMovement({
       characters,
       activeCharId,
       currentMapId,
       networkMode,
-      isModalOpen: !!interactionResult,
+      isModalOpen: !!interactionResult || isCharSetupOpen,
       setCharacters,
       onSendMoveAction: (charId, x, y, mapId) => {
           if (networkMode === 'CLIENT') {
             sendToHost({ type: 'REQUEST_MOVE_CHAR', charId, x, y, mapId });
           } else if (networkMode === 'HOST') {
-            // Host Local Move -> Broadcast Delta
             broadcast({ type: 'ON_MOVE_CHAR', charId, x, y, mapId });
           }
       }
@@ -90,33 +94,23 @@ export const Player: React.FC<PlayerProps> = ({
   useEffect(() => {
       let animationFrameId: number;
       const lerp = (start: number, end: number, t: number) => start + (end - start) * t;
-
       const loop = () => {
           setCharacters(prev => {
               let changed = false;
               const next = prev.map(c => {
-                  // Skip active character (handled by input loop)
                   if (c.id === activeCharId) return c;
-
                   const target = remoteTargets.current[c.id];
                   if (!target) {
-                      // Init target if missing
                       remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' };
                       return c;
                   }
-
-                  // Check Map ID mismatch - Snap immediately
                   if (c.mapId !== target.mapId) {
                       changed = true;
                       return { ...c, x: target.x, y: target.y, mapId: target.mapId };
                   }
-
-                  // Calculate distance
                   const dx = target.x - c.x;
                   const dy = target.y - c.y;
                   const dist = Math.sqrt(dx*dx + dy*dy);
-
-                  // If very close, snap
                   if (dist < 1) {
                       if (c.x !== target.x || c.y !== target.y) {
                           changed = true;
@@ -124,391 +118,230 @@ export const Player: React.FC<PlayerProps> = ({
                       }
                       return c;
                   }
-
-                  // Lerp (0.2 factor for smooth catchup)
                   changed = true;
-                  return {
-                      ...c,
-                      x: lerp(c.x, target.x, 0.2),
-                      y: lerp(c.y, target.y, 0.2)
-                  };
+                  return { ...c, x: lerp(c.x, target.x, 0.2), y: lerp(c.y, target.y, 0.2) };
               });
               return changed ? next : prev;
           });
           animationFrameId = requestAnimationFrame(loop);
       };
-      
       animationFrameId = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(animationFrameId);
   }, [activeCharId]);
 
-  // -- Network Logic Sync --
-
-  // Host: Heartbeat Sync & Event-based Sync
-  useEffect(() => {
-    if (networkMode === 'HOST') {
-        // Critical updates that need immediate full sync (Map change, Interaction, Chat)
-        // Note: 'characters' removed to prevent movement flood
-        broadcast({
-            type: 'SYNC_STATE',
-            payload: {
-                currentMapId,
-                characters,
-                interactionResult,
-                chatMessages
-            }
-        });
-    }
-  }, [currentMapId, interactionResult, chatMessages, networkMode, broadcast, connections.length]); 
-
-  // Host: Heartbeat (Every 2s) to ensure eventual consistency
-  useEffect(() => {
-      if (networkMode === 'HOST') {
-          const interval = setInterval(() => {
-             broadcast({
-                type: 'SYNC_STATE',
-                payload: { currentMapId, characters, interactionResult, chatMessages }
-            });
-          }, 2000);
-          return () => clearInterval(interval);
-      }
-  }, [networkMode, characters, currentMapId, interactionResult, chatMessages, broadcast]);
-
-  // Host: Initial GameData Sync on connection
-  useEffect(() => {
-    if (networkMode === 'HOST') {
-        broadcast({ type: 'SYNC_GAMEDATA', payload: gameData });
-    }
-  }, [networkMode, broadcast, connections.length, gameData]);
-
-
-  // Client & Host: Handle Incoming Data
+  // -- Network Listeners --
   useEffect(() => {
     const handleAction = (data: any) => {
+        const currentState = stateRef.current;
+        const currentMap = currentState.gameData.maps.find(m => m.id === currentState.currentMapId);
+
         if (networkMode === 'HOST') {
-            // Process Requests from Clients
             switch (data.type) {
                 case 'REQUEST_ACTION':
                     if (data.action === 'CLICK_OBJECT') {
                         const obj = currentMap?.objects.find((o: any) => o.id === data.objectId);
-                        if (obj) handleObjectClickLogic(obj);
-                    } else if (data.action === 'MOVE_MAP') {
-                        handleMoveLogic(data.targetMapId);
-                    } else if (data.action === 'CLOSE_MODAL') {
-                        setInteractionResult(null);
-                    }
+                        if (obj && (!obj.hidden || isAdmin)) handleObjectClickLogic(obj);
+                    } else if (data.action === 'MOVE_MAP') handleMoveLogic(data.targetMapId);
+                    else if (data.action === 'CLOSE_MODAL') setInteractionResult(null);
+                    break;
+                case 'REQUEST_TOGGLE_OBJECT_VISIBILITY':
+                    handleToggleVisibilityLogic(data.mapId, data.objectId, data.hidden);
                     break;
                 case 'REQUEST_CHAR_UPDATE':
-                    // Critical Update -> Full Sync Triggered by State Change
-                    setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, ...data.updates } : c));
+                    setCharacters(prev => {
+                        const newChars = prev.map(c => c.id === data.charId ? { ...c, ...data.updates } : c);
+                        broadcast({ type: 'SYNC_STATE', payload: { ...currentState, characters: newChars } });
+                        return newChars;
+                    });
                     break;
-                case 'REQUEST_ADD_CHAR':
-                    handleAddCharacterLogic();
+                case 'REQUEST_ADD_CHAR': 
+                    setCharacters(prev => {
+                        const newChars = [...prev, data.character];
+                        broadcast({ type: 'SYNC_STATE', payload: { ...currentState, characters: newChars } });
+                        return newChars;
+                    });
                     break;
                 case 'REQUEST_CHAT':
-                    setChatMessages(prev => [...prev, {
-                        id: generateId(),
-                        senderName: data.senderName,
-                        text: data.text,
-                        timestamp: Date.now(),
-                        isSystem: false
-                    }]);
+                    setChatMessages(prev => [...prev, { id: generateId(), senderName: data.senderName, text: data.text, timestamp: Date.now(), isSystem: false }]);
                     break;
                 case 'REQUEST_MOVE_CHAR':
-                    // Update Target Ref (Interpolated)
                     remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
-                    // Broadcast Delta immediately to others
+                    setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c));
                     broadcast({ type: 'ON_MOVE_CHAR', charId: data.charId, x: data.x, y: data.y, mapId: data.mapId });
                     break;
             }
         } else if (networkMode === 'CLIENT') {
-            // Process Sync from Host
             if (data.type === 'SYNC_STATE') {
-                const { currentMapId: sMap, characters: sChars, interactionResult: sRes, chatMessages: sChat } = data.payload;
-                setCurrentMapId(sMap);
-                setCharacters(sChars); // Full sync overwrites
-                
-                // Sync Interpolation Targets
-                sChars.forEach((c: Character) => {
-                    remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' };
-                });
-
+                const { characters: sChars, interactionResult: sRes, chatMessages: sChat } = data.payload;
+                setCharacters(sChars);
+                sChars.forEach((c: Character) => { remoteTargets.current[c.id] = { x: c.x, y: c.y, mapId: c.mapId || '' }; });
                 setInteractionResult(sRes);
                 if (sChat) setChatMessages(sChat);
                 setIsDataLoaded(true);
             } else if (data.type === 'ON_MOVE_CHAR') {
-                // Delta Update for Movement (Interpolated)
                 remoteTargets.current[data.charId] = { x: data.x, y: data.y, mapId: data.mapId };
+                setCharacters(prev => prev.map(c => c.id === data.charId ? { ...c, x: data.x, y: data.y, mapId: data.mapId } : c));
             } else if (data.type === 'SYNC_GAMEDATA') {
                 setGameData(data.payload);
                 setIsDataLoaded(true);
+            } else if (data.type === 'ADMIN_ANNOUNCEMENT') {
+                if (data.targetId === null || data.targetId === currentState.activeCharId) {
+                    setAnnouncement({ title: data.title, message: data.message });
+                }
             }
         }
     };
 
     if (networkMode === 'HOST') {
-        connections.forEach(conn => {
-            conn.off('data'); 
-            conn.on('data', handleAction);
-        });
+        connections.forEach(conn => { conn.off('data'); conn.on('data', handleAction); });
     } else if (networkMode === 'CLIENT' && hostConnection) {
-        hostConnection.off('data');
-        hostConnection.on('data', handleAction);
+        hostConnection.off('data'); hostConnection.on('data', handleAction);
     }
-  }, [networkMode, connections, hostConnection, currentMap, characters, gameData]);
-
+  }, [networkMode, connections, hostConnection, isAdmin]);
 
   // -- Logic Handlers --
-
   const handleAdminLogin = (key: string) => {
       if (gameData.adminKey && key === gameData.adminKey) {
           setIsAdmin(true);
           alert("운영자 권한을 획득했습니다.");
-      } else {
-          alert("운영자 키가 올바르지 않습니다.");
-      }
+      } else alert("운영자 키가 올바르지 않습니다.");
   };
 
   const handleSendMessage = (text: string) => {
-      const senderName = networkMode === 'HOST' ? (isAdmin ? 'GM (Host)' : 'Host') : (isAdmin ? 'GM' : activeChar.name);
-      if (networkMode === 'CLIENT') {
-          sendToHost({ type: 'REQUEST_CHAT', text, senderName });
+      const senderName = networkMode === 'HOST' ? (isAdmin ? 'GM (Host)' : 'Host') : (isAdmin ? 'GM' : (activeChar?.name || '익명'));
+      if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_CHAT', text, senderName });
+      else {
+          const newMsg = { id: generateId(), senderName, text, timestamp: Date.now(), isSystem: false };
+          setChatMessages(prev => [...prev, newMsg]);
+          if (networkMode === 'HOST') broadcast({ type: 'REQUEST_CHAT', ...newMsg });
+      }
+  };
+
+  const sendAdminAnnouncement = (targetId: string | null, title: string, message: string) => {
+      if (isAdmin && networkMode === 'HOST') {
+          broadcast({ type: 'ADMIN_ANNOUNCEMENT', targetId, title, message });
+          if (targetId === null || targetId === activeCharId) setAnnouncement({ title, message });
+      }
+  };
+
+  const handleToggleVisibility = (mapId: string, objectId: string, hidden: boolean) => {
+      if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_TOGGLE_OBJECT_VISIBILITY', mapId, objectId, hidden });
+      else handleToggleVisibilityLogic(mapId, objectId, hidden);
+  };
+
+  const handleToggleVisibilityLogic = (mapId: string, objectId: string, hidden: boolean) => {
+      setGameData(prev => {
+          const newMaps = prev.maps.map(m => m.id === mapId ? { ...m, objects: m.objects.map(obj => obj.id === objectId ? { ...obj, hidden } : obj) } : m);
+          const newData = { ...prev, maps: newMaps };
+          if (networkMode === 'HOST') broadcast({ type: 'SYNC_GAMEDATA', payload: newData });
+          return newData;
+      });
+  };
+
+  const handleSummonPlayer = (targetId: string | 'ALL') => {
+      if (!isAdmin) return;
+      const executeSummon = (charId: string) => {
+          if (networkMode === 'HOST') {
+              setCharacters(prev => prev.map(c => c.id === charId ? { ...c, mapId: currentMapId, x: 100, y: 400 } : c));
+              broadcast({ type: 'ON_MOVE_CHAR', charId, x: 100, y: 400, mapId: currentMapId });
+          } else sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: charId, x: 100, y: 400, mapId: currentMapId });
+      };
+      if (targetId === 'ALL') {
+          characters.forEach(c => executeSummon(c.id));
+          handleSendMessage(`시스템: 모든 플레이어를 [${currentMap?.name}]으로 소환합니다.`);
       } else {
-          setChatMessages(prev => [...prev, {
-              id: generateId(),
-              senderName,
-              text,
-              timestamp: Date.now(),
-              isSystem: false
-          }]);
+          executeSummon(targetId);
+          const name = characters.find(c => c.id === targetId)?.name || '대상';
+          handleSendMessage(`시스템: [${name}]을 [${currentMap?.name}]으로 소환했습니다.`);
       }
   };
 
   const handleMoveLogic = (mapId: string) => {
-    const target = gameData.maps.find(m => m.id === mapId);
-    if (target) {
-        setCurrentMapId(mapId);
-        setInteractionResult(null);
-        // Reset positions slightly to avoid spawn trap
-        setCharacters(prev => prev.map(c => ({...c, mapId: mapId, x: 100, y: 400})));
+    if (stateRef.current.gameData.maps.find(m => m.id === mapId)) {
+        setCurrentMapId(mapId); setInteractionResult(null);
+        setCharacters(prev => prev.map(c => c.id === activeCharId ? {...c, mapId: mapId, x: 100, y: 400} : c));
+        if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: activeCharId, x: 100, y: 400, mapId: mapId });
+        else broadcast({ type: 'ON_MOVE_CHAR', charId: activeCharId, x: 100, y: 400, mapId: mapId });
     }
   };
 
   const handleObjectClick = (obj: MapObject) => {
-      if (networkMode === 'CLIENT') {
-          sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
-      } else {
-          handleObjectClickLogic(obj);
-      }
+      if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
+      else handleObjectClickLogic(obj);
   };
 
   const handleObjectClickLogic = (obj: MapObject) => {
-    const isDirectMove = (obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId));
+    if ((obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId)) && (!obj.description || obj.description.trim() === '')) {
+      if (obj.targetMapId) { handleMoveLogic(obj.targetMapId); return; }
+    }
     
-    if (isDirectMove && (!obj.description || obj.description.trim() === '')) {
-      if (obj.targetMapId) {
-        handleMoveLogic(obj.targetMapId);
-        return;
-      }
-    }
-
-    if (obj.type === 'OBJECT' || (obj.type as any) === 'MAP_LINK') { 
-      let resultData: any = {
-          objectName: obj.label,
-          description: obj.description,
-          hasRoll: false,
-      };
-
-      if (obj.useProbability && obj.data) {
-          const resultType = rollDice(obj.data);
-          const outcome = obj.data.outcomes[resultType];
-          
-          setCharacters(prev => prev.map(c => {
-            if (c.id === activeCharId) {
-              const newHp = Math.min(c.maxHp, c.hp + outcome.hpChange);
-              const newInventory = outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory;
-              return { ...c, hp: newHp, inventory: newInventory };
-            }
-            return c;
-          }));
-
-          resultData.hasRoll = true;
-          resultData.type = resultType;
-          resultData.outcome = outcome;
-          
-          if (outcome.targetMapId) resultData.targetMapId = outcome.targetMapId;
-      } else {
-          if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
-      }
-
-      if (resultData.targetMapId) {
-          const targetMap = gameData.maps.find(m => m.id === resultData.targetMapId);
-          if (targetMap) resultData.targetMapName = targetMap.name;
-      }
-
-      setInteractionResult(resultData);
-    }
-  };
-
-  const handleAddCharacterLogic = () => {
-    const newId = `char_${generateId()}`;
-    const newChar: Character = {
-      id: newId,
-      name: `탐사자 ${characters.length + 1}`,
-      desc: '',
-      hp: 100,
-      maxHp: 100,
-      inventory: [],
-      mapId: currentMapId,
-      x: 100 + (characters.length * 50),
-      y: 400
+    let resultData: any = { objectName: obj.label, description: obj.description, hasRoll: false };
+    
+    const applyVisibilityTriggers = (revealId?: string, hideId?: string) => {
+        if (revealId) handleToggleVisibility(currentMapId, revealId, false);
+        if (hideId) handleToggleVisibility(currentMapId, hideId, true);
     };
-    setCharacters(prev => [...prev, newChar]);
-    if (networkMode === 'HOST') setActiveCharId(newId);
-  };
 
-  const handleDeleteCharacter = (id: string) => {
-    if (networkMode === 'CLIENT') return;
-    if (characters.length <= 1) {
-        alert("최소 한 명의 캐릭터는 필요합니다.");
-        return;
+    if (obj.useProbability && obj.data) {
+        const resultType = rollDice(obj.data);
+        const outcome = obj.data.outcomes[resultType];
+        applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
+
+        setCharacters(prev => prev.map(c => c.id === activeCharId ? { ...c, hp: Math.min(c.maxHp, c.hp + outcome.hpChange), inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory } : c));
+        resultData = { ...resultData, hasRoll: true, type: resultType, outcome };
+        if (outcome.targetMapId) resultData.targetMapId = outcome.targetMapId;
+    } else {
+        applyVisibilityTriggers(obj.revealObjectId, obj.hideObjectId);
+        if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
     }
-    const newChars = characters.filter(c => c.id !== id);
-    setCharacters(newChars);
-    if (activeCharId === id) setActiveCharId(newChars[0].id);
+
+    if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
+    setInteractionResult(resultData);
   };
 
-  // -- Render --
+  const handleAddCharacterLogic = (character: Character) => {
+    setCharacters(prev => [...prev, character]);
+    if (networkMode === 'HOST') { 
+        setActiveCharId(character.id); 
+        broadcast({ type: 'SYNC_STATE', payload: { ...stateRef.current, characters: [...stateRef.current.characters, character] } }); 
+    } else if (networkMode === 'CLIENT') {
+        setActiveCharId(character.id);
+        sendToHost({ type: 'REQUEST_ADD_CHAR', character });
+    }
+  };
 
-  if (!isDataLoaded) {
-      return (
-          <div className="flex h-screen items-center justify-center bg-[#2e2e2e] text-white flex-col gap-4">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
-              <p>호스트로부터 데이터를 동기화 중입니다...</p>
-          </div>
-      );
-  }
+  if (!isDataLoaded) return <div className="flex h-screen items-center justify-center bg-[#2e2e2e] text-white flex-col gap-4"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div><p>데이터 동기화 중...</p></div>;
 
   return (
     <div className="flex h-screen bg-[#2e2e2e] text-gray-100 overflow-hidden font-sans">
       <div className="flex-1 flex flex-col relative overflow-hidden">
         <PlayerHUD currentMapName={currentMap?.name || 'Unknown'} onExit={onExit} isAdmin={isAdmin} />
-        
-        {/* Network Status Bar */}
-        {networkMode !== 'SOLO' && (
-            <div className={`h-8 flex items-center justify-center gap-2 text-xs font-bold ${networkMode === 'HOST' ? 'bg-orange-900/50 text-orange-200' : 'bg-blue-900/50 text-blue-200'}`}>
-                <Wifi size={14} />
-                <span>{networkMode === 'HOST' ? 'HOST MODE' : 'CLIENT MODE'}</span>
-                {networkMode === 'HOST' && network.peerId && (
-                    <div 
-                        className="flex items-center gap-2 ml-4 bg-black/30 px-2 py-0.5 rounded cursor-pointer hover:bg-black/50"
-                        onClick={() => {
-                            navigator.clipboard.writeText(network.peerId!);
-                            setCopiedId(true);
-                            setTimeout(() => setCopiedId(false), 2000);
-                        }}
-                    >
-                        <span className="opacity-70">초대 코드:</span>
-                        <span className="font-mono text-white select-all">{network.peerId}</span>
-                        {copiedId ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                    </div>
-                )}
-            </div>
-        )}
-        
         <div className="flex-1 relative overflow-auto bg-[#252525] p-8 flex items-center justify-center">
             {currentMap ? (
-                <div 
-                className="relative shadow-2xl shrink-0"
-                style={{ 
-                    width: `${MAP_WIDTH}px`,
-                    height: `${MAP_HEIGHT}px`,
-                    backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none',
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    backgroundColor: '#1a1a1a'
-                }}
-                >
-                {/* Map Objects */}
-                {currentMap.objects.map(obj => (
-                    <button
-                        key={obj.id}
-                        onClick={() => handleObjectClick(obj)}
-                        className={`absolute transition-all duration-200 hover:scale-105 active:scale-95 group`}
-                        style={{
-                            left: obj.x, 
-                            top: obj.y,
-                            width: obj.width,
-                            height: obj.height,
-                            backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color,
-                            backgroundImage: obj.image ? `url(${obj.image})` : undefined,
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
-                            zIndex: 10,
-                            ...getShapeStyleLib(obj.shape)
-                        }}
-                    >
-                         {/* Labels and styling remain similar */}
-                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-gray-600 z-50">
-                        {obj.label} {obj.targetMapId && '➡'}
-                        </div>
-                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow-md pointer-events-none">
-                            {obj.type !== 'DECORATION' && (
-                                <span className="bg-black/40 px-1 rounded">{obj.label}</span>
-                            )}
-                        </span>
-                        {obj.type !== 'DECORATION' && (
-                        <div className="absolute inset-0 border-2 border-white/20 rounded-sm animate-pulse group-hover:border-emerald-400 pointer-events-none" style={getShapeStyleLib(obj.shape)}></div>
-                        )}
+                <div className="relative shadow-2xl shrink-0" style={{ width: `${MAP_WIDTH}px`, height: `${MAP_HEIGHT}px`, backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: '#1a1a1a' }}>
+                {visibleObjects.map(obj => (
+                    <button key={obj.id} onClick={() => handleObjectClick(obj)} className={`absolute transition-all duration-200 hover:scale-105 active:scale-95 group ${obj.hidden ? 'opacity-40 grayscale-[0.5]' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 10, ...getShapeStyleLib(obj.shape) }}>
+                        {obj.hidden && <div className="absolute top-1 right-1 bg-black/80 p-0.5 rounded text-[8px] text-orange-400 border border-orange-400/50 z-50">HIDDEN</div>}
+                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-gray-600 z-50">{obj.label} {obj.targetMapId && '➡'}</div>
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow-md pointer-events-none">{obj.type !== 'DECORATION' && <span className="bg-black/40 px-1 rounded">{obj.label}</span>}</span>
+                        {obj.type !== 'DECORATION' && !obj.hidden && <div className="absolute inset-0 border-2 border-white/20 rounded-sm animate-pulse group-hover:border-emerald-400 pointer-events-none" style={getShapeStyleLib(obj.shape)}></div>}
                     </button>
                 ))}
-
-                {/* Characters */}
                 {visibleCharacters.map(char => (
-                    <div
-                        key={char.id}
-                        className={`absolute flex flex-col items-center justify-center pointer-events-none transition-transform will-change-transform`}
-                        style={{ left: char.x, top: char.y, width: CHAR_SIZE, height: CHAR_SIZE, zIndex: 50 }}
-                    >
-                        <div className="absolute -top-6 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap backdrop-blur-sm border border-white/20 shadow-sm z-50">
-                            {char.name}
-                        </div>
-                        <div className={`w-full h-full rounded-lg overflow-hidden bg-[#222] shadow-xl ${char.id === activeCharId ? 'ring-2 ring-yellow-400' : 'shadow-black/50'}`}>
-                            {char.avatar ? <img src={char.avatar} alt={char.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center bg-indigo-700 text-white"><User size={32} /></div>}
-                        </div>
-                        <div className="absolute -bottom-3 w-full h-1.5 bg-gray-700 rounded-full overflow-hidden border border-black shadow-sm">
-                            <div className="h-full bg-green-500 transition-all duration-300" style={{ width: `${(char.hp / char.maxHp) * 100}%` }} />
-                        </div>
+                    <div key={char.id} className={`absolute flex flex-col items-center justify-center pointer-events-none transition-transform will-change-transform`} style={{ left: char.x, top: char.y, width: CHAR_SIZE, height: CHAR_SIZE, zIndex: 50 }}>
+                        <div className="absolute -top-6 bg-black/50 text-white text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap backdrop-blur-sm border border-white/20 shadow-sm z-50">{char.name}</div>
+                        <div className={`w-full h-full rounded-lg overflow-hidden bg-[#222] shadow-xl ${char.id === activeCharId ? 'ring-2 ring-yellow-400' : 'shadow-black/50'}`}>{char.avatar ? <img src={char.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center bg-indigo-700 text-white"><User size={32} /></div>}</div>
+                        <div className="absolute -bottom-3 w-full h-1.5 bg-gray-700 rounded-full overflow-hidden border border-black shadow-sm"><div className="h-full bg-green-500 transition-all duration-300" style={{ width: `${(char.hp / char.maxHp) * 100}%` }} /></div>
                     </div>
                 ))}
                 </div>
-            ) : (
-                <div className="text-gray-500">맵 데이터를 찾을 수 없습니다.</div>
-            )}
+            ) : <div className="text-gray-500">맵 데이터 없음</div>}
         </div>
       </div>
-
-      <PlayerSidebar 
-        characters={characters}
-        activeCharId={activeCharId}
-        chatMessages={chatMessages}
-        isAdmin={isAdmin}
-        onSelectChar={setActiveCharId}
-        onAddChar={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ADD_CHAR' }) : handleAddCharacterLogic()}
-        onUpdateChar={(id, updates) => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_CHAR_UPDATE', charId: id, updates }) : setCharacters(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c))}
-        onDeleteChar={handleDeleteCharacter}
-        onSendMessage={handleSendMessage}
-        onAdminLogin={handleAdminLogin}
-      />
-
-      {interactionResult && (
-        <InteractionModal 
-          data={interactionResult} 
-          characterName={activeChar.name}
-          onClose={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ACTION', action: 'CLOSE_MODAL' }) : setInteractionResult(null)}
-          onMove={(mapId) => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ACTION', action: 'MOVE_MAP', targetMapId: mapId }) : handleMoveLogic(mapId)}
-        />
-      )}
+      <PlayerSidebar characters={characters} activeCharId={activeCharId} chatMessages={chatMessages} isAdmin={isAdmin} onSelectChar={setActiveCharId} onAddChar={() => setIsCharSetupOpen(true)} onUpdateChar={(id, updates) => { setCharacters(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c)); if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_CHAR_UPDATE', charId: id, updates }); }} onDeleteChar={(id) => { if(networkMode !== 'CLIENT') { const nextChars = characters.filter(c => c.id !== id); setCharacters(nextChars); if(activeCharId === id) setActiveCharId(nextChars[0]?.id || ''); } }} onSendMessage={handleSendMessage} onAdminLogin={handleAdminLogin} onSendAnnouncement={sendAdminAnnouncement} onSummonPlayer={handleSummonPlayer} currentMapObjects={currentMap?.objects || []} onToggleVisibility={handleToggleVisibility} currentMapId={currentMapId} />
+      {interactionResult && <InteractionModal data={interactionResult} characterName={activeChar?.name || '익명'} onClose={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ACTION', action: 'CLOSE_MODAL' }) : setInteractionResult(null)} onMove={handleMoveLogic} />}
+      {announcement && <Modal isOpen={true} title="📣 시스템 공지" onClose={() => setAnnouncement(null)} maxWidth="max-w-md" footer={<Button variant="primary" onClick={() => setAnnouncement(null)}>확인</Button>}><div className="flex flex-col items-center text-center p-2"><div className="bg-orange-900/30 p-4 rounded-full mb-4 border border-orange-500/50"><Megaphone size={40} className="text-orange-500" /></div><h3 className="text-xl font-bold text-white mb-2">{announcement.title}</h3><p className="text-gray-300 whitespace-pre-wrap">{announcement.message}</p></div></Modal>}
+      <CharacterSetupModal gameData={gameData} isOpen={isCharSetupOpen} onClose={() => setIsCharSetupOpen(false)} onAdd={handleAddCharacterLogic} />
     </div>
   );
 };

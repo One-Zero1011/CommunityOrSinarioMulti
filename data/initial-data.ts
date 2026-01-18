@@ -1,5 +1,5 @@
 
-import { GameData, ProbabilityProfile, MapScene, FactionGameData, FactionMap, CombatGameData } from '../types';
+import { GameData, ProbabilityProfile, MapScene, FactionGameData, FactionMap } from '../types';
 
 export const DEFAULT_PROBABILITY: ProbabilityProfile = {
   criticalSuccess: 10,
@@ -50,15 +50,4 @@ export const INITIAL_FACTION_DATA: FactionGameData = {
         { id: 'faction_1', name: '레드 진영', color: '#f87171', teams: [] },
         { id: 'faction_2', name: '블루 진영', color: '#60a5fa', teams: [] }
     ]
-};
-
-// -- Combat Data --
-
-export const INITIAL_COMBAT_DATA: CombatGameData = {
-  title: "나만의 전투 시스템",
-  stats: [
-    { id: 'stat_str', label: '근력', min: 1, max: 20, defaultValue: 10 },
-    { id: 'stat_dex', label: '민첩', min: 1, max: 20, defaultValue: 10 },
-    { id: 'stat_int', label: '지능', min: 1, max: 20, defaultValue: 10 }
-  ]
 };

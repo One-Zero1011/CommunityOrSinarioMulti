@@ -2,7 +2,7 @@
 import JSZip from 'jszip';
 // @ts-ignore
 import * as XLSX from 'xlsx';
-import { GameData, MapScene, MapObject, FactionGameData } from '../types';
+import { GameData, MapScene, MapObject, FactionGameData, CombatGameData } from '../types';
 import { blobToBase64 } from './utils';
 
 export const exportGameDataToZip = async (data: GameData) => {
@@ -67,88 +67,132 @@ export const exportGameDataToZip = async (data: GameData) => {
 export const exportGameDataToExcel = (data: GameData) => {
   const wb = XLSX.utils.book_new();
   const rows: any[] = [];
+  const merges: any[] = [];
 
-  // Headers
+  // 1. Header Row
   rows.push([
-    "맵 ID", "맵 이름", 
-    "오브젝트 ID", "라벨(이름)", "유형", "설명", "좌표(X,Y)", 
-    "이동 대상 맵",
-    "확률 사용 여부",
-    "대성공(%)", "대성공 결과", "대성공 HP", "대성공 획득", "대성공 이동",
-    "성공(%)", "성공 결과", "성공 HP", "성공 획득", "성공 이동",
-    "실패(%)", "실패 결과", "실패 HP", "실패 획득", "실패 이동",
-    "대실패(%)", "대실패 결과", "대실패 HP", "대실패 획득", "대실패 이동"
+    "세부장소 (Map)", 
+    "오브젝트 (Object)", 
+    "조건/판정 (Condition)", 
+    "효과/이동 (Effect)", 
+    "내용 (서술)", 
+    "조사 가능 구역 (Visible Zone)"
   ]);
 
-  data.maps.forEach(map => {
-    if (map.objects.length === 0) {
-       rows.push([map.id, map.name, "(없음)", "", "", "", "", "", ""]);
-    } else {
-       map.objects.forEach(obj => {
-          const row: (string | number)[] = [
-             map.id,
-             map.name,
-             obj.id,
-             obj.label,
-             obj.type,
-             obj.description || "",
-             `${obj.x},${obj.y}`,
-             obj.targetMapId ? (data.maps.find(m => m.id === obj.targetMapId)?.name || obj.targetMapId) : "",
-             obj.useProbability ? "O" : "X"
-          ];
+  // Helper to find object label by ID
+  const findObjLabel = (id?: string) => {
+      if (!id) return "";
+      for (const m of data.maps) {
+          const found = m.objects.find(o => o.id === id);
+          if (found) return found.label;
+      }
+      return id; // Fallback to ID if not found
+  };
 
-          if (obj.useProbability && obj.data) {
-             // Critical Success
-             row.push(
-               obj.data.criticalSuccess,
-               obj.data.outcomes.CRITICAL_SUCCESS.text,
-               obj.data.outcomes.CRITICAL_SUCCESS.hpChange,
-               obj.data.outcomes.CRITICAL_SUCCESS.itemDrop || "",
-               obj.data.outcomes.CRITICAL_SUCCESS.targetMapId ? (data.maps.find(m => m.id === obj.data.outcomes.CRITICAL_SUCCESS.targetMapId)?.name || "이동") : ""
-             );
-             // Success
-             row.push(
-                obj.data.success,
-                obj.data.outcomes.SUCCESS.text,
-                obj.data.outcomes.SUCCESS.hpChange,
-                obj.data.outcomes.SUCCESS.itemDrop || "",
-                obj.data.outcomes.SUCCESS.targetMapId ? (data.maps.find(m => m.id === obj.data.outcomes.SUCCESS.targetMapId)?.name || "이동") : ""
-              );
-             // Failure
-             row.push(
-                obj.data.failure,
-                obj.data.outcomes.FAILURE.text,
-                obj.data.outcomes.FAILURE.hpChange,
-                obj.data.outcomes.FAILURE.itemDrop || "",
-                obj.data.outcomes.FAILURE.targetMapId ? (data.maps.find(m => m.id === obj.data.outcomes.FAILURE.targetMapId)?.name || "이동") : ""
-              );
-             // Critical Failure
-             row.push(
-                obj.data.criticalFailure,
-                obj.data.outcomes.CRITICAL_FAILURE.text,
-                obj.data.outcomes.CRITICAL_FAILURE.hpChange,
-                obj.data.outcomes.CRITICAL_FAILURE.itemDrop || "",
-                obj.data.outcomes.CRITICAL_FAILURE.targetMapId ? (data.maps.find(m => m.id === obj.data.outcomes.CRITICAL_FAILURE.targetMapId)?.name || "이동") : ""
-              );
-          } else {
-             // Fill empty cells for structure
-             row.push(...Array(20).fill(""));
-          }
-          rows.push(row);
-       });
+  // Helper to find map name by ID
+  const findMapName = (id?: string) => {
+      if (!id) return "";
+      const m = data.maps.find(map => map.id === id);
+      return m ? m.name : id;
+  };
+
+  let rowIndex = 1; // Current row index (0-based, starting after header)
+
+  data.maps.forEach(map => {
+    const mapStartRow = rowIndex;
+    
+    // Generate a summary string of visible objects for the last column
+    const visibleObjectsStr = map.objects
+        .filter(o => !o.hidden && (o.type === 'OBJECT' || o.type === 'MAP_LINK'))
+        .map(o => `[ ${o.label} ]`)
+        .join("  ");
+
+    if (map.objects.length === 0) {
+        // Empty map case
+        rows.push([map.name, "(오브젝트 없음)", "", "", "", ""]);
+        rowIndex++;
+    } else {
+        map.objects.forEach(obj => {
+            const objStartRow = rowIndex;
+
+            // --- Row A: Basic Description (Always present) ---
+            const baseEffects: string[] = [];
+            if (obj.targetMapId) baseEffects.push(`이동: ${findMapName(obj.targetMapId)}`);
+            if (obj.revealObjectId) baseEffects.push(`공개: ${findObjLabel(obj.revealObjectId)}`);
+            if (obj.hideObjectId) baseEffects.push(`숨김: ${findObjLabel(obj.hideObjectId)}`);
+
+            rows.push([
+                map.name,                 // Col 0: Map Name
+                obj.label,                // Col 1: Object Name
+                "기본 (Default)",         // Col 2: Condition
+                baseEffects.join("\n"),   // Col 3: Effect
+                obj.description || "",    // Col 4: Description
+                visibleObjectsStr         // Col 5: Visible Zone
+            ]);
+            rowIndex++;
+
+            // --- Row B~E: Probability Outcomes ---
+            if (obj.useProbability && obj.data) {
+                const outcomes = [
+                    { label: "대성공", data: obj.data.outcomes.CRITICAL_SUCCESS },
+                    { label: "성공", data: obj.data.outcomes.SUCCESS },
+                    { label: "실패", data: obj.data.outcomes.FAILURE },
+                    { label: "대실패", data: obj.data.outcomes.CRITICAL_FAILURE },
+                ];
+
+                outcomes.forEach(outcome => {
+                    const effs: string[] = [];
+                    if (outcome.data.hpChange !== 0) effs.push(`HP ${outcome.data.hpChange > 0 ? '+' : ''}${outcome.data.hpChange}`);
+                    if (outcome.data.itemDrop) effs.push(`획득: ${outcome.data.itemDrop}`);
+                    if (outcome.data.targetMapId) effs.push(`이동: ${findMapName(outcome.data.targetMapId)}`);
+                    if (outcome.data.revealObjectId) effs.push(`공개: ${findObjLabel(outcome.data.revealObjectId)}`);
+                    if (outcome.data.hideObjectId) effs.push(`숨김: ${findObjLabel(outcome.data.hideObjectId)}`);
+
+                    rows.push([
+                        map.name,
+                        obj.label,
+                        outcome.label,
+                        effs.join("\n"),
+                        outcome.data.text,
+                        visibleObjectsStr
+                    ]);
+                    rowIndex++;
+                });
+            }
+
+            // Merge Object Name Column (if it spans multiple rows)
+            if (rowIndex - 1 > objStartRow) {
+                merges.push({ s: { r: objStartRow, c: 1 }, e: { r: rowIndex - 1, c: 1 } });
+            }
+        });
+    }
+
+    // Merge Map Name Column & Visible Zone Column (if they span multiple rows)
+    if (rowIndex - 1 > mapStartRow) {
+        merges.push({ s: { r: mapStartRow, c: 0 }, e: { r: rowIndex - 1, c: 0 } }); // Map Name
+        merges.push({ s: { r: mapStartRow, c: 5 }, e: { r: rowIndex - 1, c: 5 } }); // Visible Zone
     }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   
-  // Auto-width adjustment approximation
-  const wscols = rows[0].map(() => ({ wch: 15 }));
-  wscols[1] = { wch: 20 }; // Map Name
-  wscols[3] = { wch: 20 }; // Label
-  wscols[5] = { wch: 30 }; // Description
+  // Apply Merges
+  if (merges.length > 0) {
+      ws['!merges'] = merges;
+  }
+
+  // Set Column Widths for better readability
+  const wscols = [
+      { wch: 20 }, // Map Name
+      { wch: 25 }, // Object Name
+      { wch: 15 }, // Condition
+      { wch: 25 }, // Effect
+      { wch: 60 }, // Description Text
+      { wch: 40 }, // Visible Zone Summary
+  ];
   ws['!cols'] = wscols;
 
-  XLSX.utils.book_append_sheet(wb, ws, "시나리오 데이터");
+  XLSX.utils.book_append_sheet(wb, ws, "시나리오 상세");
   XLSX.writeFile(wb, `Scenario_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
 
@@ -246,4 +290,23 @@ export const loadFactionDataFromFile = async (file: File): Promise<FactionGameDa
       reader.onerror = () => reject('파일 읽기 실패');
       reader.readAsText(file);
     });
+};
+
+export const loadCombatDataFromFile = async (file: File): Promise<CombatGameData> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (!json.stats || !Array.isArray(json.stats)) {
+           throw new Error("올바르지 않은 전투 데이터 형식입니다.");
+        }
+        resolve(json);
+      } catch (err) {
+        reject('파일 로드 실패: ' + err);
+      }
+    };
+    reader.onerror = () => reject('파일 읽기 실패');
+    reader.readAsText(file);
+  });
 };

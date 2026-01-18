@@ -1,11 +1,12 @@
 
 import React, { useRef, useState } from 'react';
-import { GameData } from '../../types';
-import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle, Key } from 'lucide-react';
+import { GameData, CustomStatDef } from '../../types';
+import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle, Key, UserCog, Trash2, Heart } from 'lucide-react';
 import { exportGameDataToZip, exportGameDataToExcel, loadGameDataFromFile } from '../../lib/file-storage';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
+import { generateId } from '../../lib/utils';
 
 interface EditorSidebarProps {
   data: GameData;
@@ -26,7 +27,7 @@ interface ConfirmationState {
 export const EditorSidebar: React.FC<EditorSidebarProps> = ({ 
   data, currentMapId, onSelectMap, onAddMap, onSave, onLoadData, onBack
 }) => {
-  const [autoSaveInterval, setAutoSaveInterval] = useState<number>(10000); // Default 10s
+  const [autoSaveInterval, setAutoSaveInterval] = useState<number>(10000); 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationState>({
     isOpen: false,
@@ -36,36 +37,36 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
   
   const { hasAutosave, lastAutoSaveTime, loadAutosave } = useAutoSave(data, autoSaveInterval);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // -- Action Handlers (Trigger Modal) --
 
-  const handleLoadAutosaveTrigger = () => {
-    setConfirmation({
-      isOpen: true,
-      type: 'AUTOSAVE',
-      file: null
-    });
+  const handleAddCustomStat = () => {
+    const newStat: CustomStatDef = {
+      id: generateId(),
+      label: '새 스탯',
+      min: 0,
+      max: 100,
+      defaultValue: 50,
+      hpWeight: 0,
+      isHpBound: false
+    };
+    const updatedStats = [...(data.customStats || []), newStat];
+    onSave({ ...data, customStats: updatedStats });
   };
 
-  const handleImportTrigger = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleUpdateCustomStat = (id: string, updates: Partial<CustomStatDef>) => {
+    let updatedStats = (data.customStats || []).map(s => s.id === id ? { ...s, ...updates } : s);
+    
+    // If setting isHpBound to true, unset others
+    if (updates.isHpBound === true) {
+        updatedStats = updatedStats.map(s => s.id === id ? s : { ...s, isHpBound: false });
+    }
 
-    // Reset input value so the same file can be selected again later
-    e.target.value = '';
-
-    setConfirmation({
-      isOpen: true,
-      type: 'IMPORT',
-      file: file
-    });
+    onSave({ ...data, customStats: updatedStats });
   };
 
-  const closeConfirmation = () => {
-    setConfirmation({ isOpen: false, type: null, file: null });
+  const handleRemoveCustomStat = (id: string) => {
+    const updatedStats = (data.customStats || []).filter(s => s.id !== id);
+    onSave({ ...data, customStats: updatedStats });
   };
-
-  // -- Execution Logic --
 
   const executeLoadAction = async () => {
     if (confirmation.type === 'AUTOSAVE') {
@@ -75,21 +76,12 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         try {
             const loadedData = await loadGameDataFromFile(confirmation.file);
             onLoadData(loadedData);
-            // alert("파일을 불러왔습니다"); // Success feedback if needed
         } catch (err) {
             console.error(err);
             alert(err instanceof Error ? err.message : '파일 로드 중 오류가 발생했습니다.');
         }
     }
-    closeConfirmation();
-  };
-
-  const handleExport = () => {
-    exportGameDataToZip(data);
-  };
-
-  const handleExcelExport = () => {
-    exportGameDataToExcel(data);
+    setConfirmation({ isOpen: false, type: null, file: null });
   };
 
   return (
@@ -114,7 +106,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         <div className="p-4 border-t border-[#444] space-y-2">
           {hasAutosave && (
             <div className="mb-2 pb-2 border-b border-[#444]">
-                <button onClick={handleLoadAutosaveTrigger} className="w-full bg-orange-900/40 hover:bg-orange-800/60 text-orange-200 text-xs py-2 rounded flex items-center justify-center gap-2 mb-1 border border-orange-700/50 transition-colors">
+                <button onClick={() => setConfirmation({ isOpen: true, type: 'AUTOSAVE', file: null })} className="w-full bg-orange-900/40 hover:bg-orange-800/60 text-orange-200 text-xs py-2 rounded flex items-center justify-center gap-2 mb-1 border border-orange-700/50 transition-colors">
                   <RotateCcw size={14} /> 자동 저장 불러오기
                 </button>
                 {lastAutoSaveTime && (
@@ -134,16 +126,20 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
               <input 
                   type="file" 
                   ref={fileInputRef} 
-                  onChange={handleImportTrigger} 
+                  onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if(file) setConfirmation({ isOpen: true, type: 'IMPORT', file });
+                      e.target.value = '';
+                  }} 
                   accept=".json,.zip" 
                   className="hidden" 
               />
-              <Button fullWidth onClick={handleExport} variant="secondary" className="text-xs px-2">
+              <Button fullWidth onClick={() => exportGameDataToZip(data)} variant="secondary" className="text-xs px-2">
                   <Download size={14} /> ZIP
               </Button>
           </div>
           
-          <Button fullWidth onClick={handleExcelExport} variant="ghost" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20 text-xs border border-emerald-900/50">
+          <Button fullWidth onClick={() => exportGameDataToExcel(data)} variant="ghost" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20 text-xs border border-emerald-900/50">
               <FileSpreadsheet size={14} /> Excel 내보내기
           </Button>
 
@@ -158,97 +154,126 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         </div>
       </div>
 
-      {/* Settings Modal */}
       <Modal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-        title="에디터 설정"
-        maxWidth="max-w-sm"
-        footer={<Button variant="primary" onClick={() => setIsSettingsOpen(false)}>확인</Button>}
+        title="시나리오 설정"
+        maxWidth="max-w-md"
       >
-        <div className="space-y-6">
-          {/* Admin Key Setting */}
-          <div>
-             <label className="block text-sm font-bold text-gray-300 mb-2 flex items-center gap-2">
-                <Key size={14} className="text-orange-400"/> 운영자 암호 (Admin Key)
-             </label>
-             <input 
-                type="text" 
-                value={data.adminKey || ''}
-                onChange={(e) => onSave({ ...data, adminKey: e.target.value })}
-                placeholder="플레이 시 사용할 운영자 암호"
-                className="w-full bg-[#383838] border border-[#555] rounded px-3 py-2 text-sm text-white focus:border-orange-500 outline-none"
-             />
-             <p className="text-xs text-gray-500 mt-2">
-               * 게임 플레이 시 이 암호를 입력하면 운영자 권한을 얻을 수 있습니다.
-             </p>
-          </div>
-
-          <div className="border-t border-[#444] pt-4">
-             <label className="block text-sm font-bold text-gray-300 mb-2">자동 저장 간격</label>
-             <div className="grid grid-cols-1 gap-2">
-               {[
-                 { label: '사용 안 함', value: 0 },
-                 { label: '5초', value: 5000 },
-                 { label: '10초 (기본)', value: 10000 },
-                 { label: '30초', value: 30000 },
-                 { label: '1분', value: 60000 },
-               ].map((option) => (
-                 <button
-                   key={option.value}
-                   onClick={() => setAutoSaveInterval(option.value)}
-                   className={`flex items-center justify-between px-4 py-2 rounded text-sm transition-colors border ${
-                     autoSaveInterval === option.value
-                       ? 'bg-indigo-600 border-indigo-500 text-white'
-                       : 'bg-[#383838] border-[#444] text-gray-300 hover:bg-[#444]'
-                   }`}
-                 >
-                   <span>{option.label}</span>
-                   {autoSaveInterval === option.value && <div className="w-2 h-2 rounded-full bg-white shadow-sm" />}
-                 </button>
-               ))}
+        <div className="space-y-6 pb-4">
+          <section className="space-y-3">
+             <div>
+                <label className="block text-sm font-bold text-gray-300 mb-2 flex items-center gap-2">
+                   <Key size={14} className="text-orange-400"/> 운영자 암호
+                </label>
+                <input 
+                   type="text" 
+                   value={data.adminKey || ''}
+                   onChange={(e) => onSave({ ...data, adminKey: e.target.value })}
+                   placeholder="플레이 시 사용할 운영자 암호"
+                   className="w-full bg-[#383838] border border-[#555] rounded px-3 py-2 text-sm text-white focus:border-orange-500 outline-none"
+                />
              </div>
-             <p className="text-xs text-gray-500 mt-2">
-               * 데이터 변경이 감지되면 설정된 시간 후에 브라우저에 자동 저장됩니다.
-             </p>
-          </div>
+             <div>
+                <label className="block text-sm font-bold text-gray-300 mb-2 flex items-center gap-2">
+                   <Heart size={14} className="text-red-400"/> 캐릭터 기본 체력 (Base HP)
+                </label>
+                <input 
+                   type="number" 
+                   value={data.baseHp ?? 100}
+                   onChange={(e) => onSave({ ...data, baseHp: parseInt(e.target.value) || 0 })}
+                   className="w-full bg-[#383838] border border-[#555] rounded px-3 py-2 text-sm text-white focus:border-red-500 outline-none"
+                />
+                <p className="text-[10px] text-gray-500 mt-1">스탯 연동 전의 기본 체력 수치입니다.</p>
+             </div>
+          </section>
+
+          <section className="border-t border-[#444] pt-4">
+             <div className="flex justify-between items-center mb-3">
+                <label className="text-sm font-bold text-gray-300 flex items-center gap-2">
+                   <UserCog size={14} className="text-indigo-400"/> 캐릭터 스탯 정의
+                </label>
+                <button onClick={handleAddCustomStat} className="text-xs bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-white font-bold">+ 추가</button>
+             </div>
+             
+             <div className="space-y-3">
+                {(data.customStats || []).length === 0 && <p className="text-xs text-gray-500 italic text-center py-2">정의된 스탯이 없습니다.</p>}
+                {(data.customStats || []).map((stat) => (
+                    <div key={stat.id} className="bg-[#1e1e1e] p-3 rounded border border-[#444] relative group/stat">
+                        <div className="flex gap-2 mb-2">
+                            <input 
+                                type="text" value={stat.label} 
+                                onChange={(e) => handleUpdateCustomStat(stat.id, { label: e.target.value })}
+                                className="flex-1 bg-[#2a2a2a] border border-[#555] rounded px-2 py-1 text-xs text-white"
+                                placeholder="스탯 이름 (예: 근력)"
+                            />
+                            <button onClick={() => handleRemoveCustomStat(stat.id)} className="text-gray-500 hover:text-red-400"><Trash2 size={14}/></button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[10px] mb-3">
+                            <div>
+                                <span className="block text-gray-500 mb-1">최소값</span>
+                                <input type="number" value={stat.min} onChange={(e) => handleUpdateCustomStat(stat.id, { min: parseInt(e.target.value)||0 })} className="w-full bg-[#2a2a2a] border border-[#555] rounded p-1 text-center text-white" />
+                            </div>
+                            <div>
+                                <span className="block text-gray-500 mb-1">최대값</span>
+                                <input type="number" value={stat.max} onChange={(e) => handleUpdateCustomStat(stat.id, { max: parseInt(e.target.value)||100 })} className="w-full bg-[#2a2a2a] border border-[#555] rounded p-1 text-center text-white" />
+                            </div>
+                            <div>
+                                <span className="block text-gray-500 mb-1">기본값</span>
+                                <input type="number" value={stat.defaultValue} onChange={(e) => handleUpdateCustomStat(stat.id, { defaultValue: parseInt(e.target.value)||0 })} className="w-full bg-[#2a2a2a] border border-[#555] rounded p-1 text-center text-white" />
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4 bg-black/20 p-2 rounded">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={stat.isHpBound || false} 
+                                    onChange={(e) => handleUpdateCustomStat(stat.id, { isHpBound: e.target.checked })}
+                                    className="w-3 h-3 accent-red-500"
+                                />
+                                <span className="text-[10px] text-gray-400 font-bold uppercase">체력 연동</span>
+                            </label>
+                            {stat.isHpBound && (
+                                <div className="flex items-center gap-2 flex-1">
+                                    <span className="text-[10px] text-gray-500 whitespace-nowrap">가중치 (Weight)</span>
+                                    <input 
+                                        type="number" 
+                                        value={stat.hpWeight ?? 0}
+                                        onChange={(e) => handleUpdateCustomStat(stat.id, { hpWeight: parseInt(e.target.value) || 0 })}
+                                        className="w-12 bg-[#2a2a2a] border border-[#555] rounded text-center text-[10px] text-white"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+             </div>
+          </section>
+
+          <section className="border-t border-[#444] pt-4">
+             <label className="block text-sm font-bold text-gray-300 mb-2">자동 저장 간격</label>
+             <select 
+                value={autoSaveInterval} 
+                onChange={(e) => setAutoSaveInterval(parseInt(e.target.value))}
+                className="w-full bg-[#383838] border border-[#555] rounded px-3 py-2 text-sm text-white"
+             >
+                <option value={0}>사용 안 함</option>
+                <option value={5000}>5초</option>
+                <option value={10000}>10초 (기본)</option>
+                <option value={60000}>1분</option>
+             </select>
+          </section>
         </div>
       </Modal>
 
-      {/* Confirmation Modal */}
-      <Modal
-        isOpen={confirmation.isOpen}
-        onClose={closeConfirmation}
-        title="데이터 불러오기 확인"
-        maxWidth="max-w-sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={closeConfirmation}>취소</Button>
-            <Button variant="danger" onClick={executeLoadAction}>불러오기</Button>
-          </>
-        }
-      >
-        <div className="flex flex-col items-center text-center p-2">
-           <div className="bg-red-500/10 p-3 rounded-full mb-4">
-              <AlertTriangle size={32} className="text-red-500" />
+      <Modal isOpen={confirmation.isOpen} onClose={() => setConfirmation({ isOpen: false, type: null, file: null })} title="데이터 불러오기" maxWidth="max-w-sm">
+        <div className="text-center p-2">
+           <AlertTriangle size={32} className="text-red-500 mx-auto mb-4" />
+           <p className="text-gray-300 text-sm mb-6">작업 중인 내용이 유실될 수 있습니다. 계속하시겠습니까?</p>
+           <div className="flex gap-2">
+              <Button fullWidth variant="ghost" onClick={() => setConfirmation({ isOpen: false, type: null, file: null })}>취소</Button>
+              <Button fullWidth variant="danger" onClick={executeLoadAction}>불러오기</Button>
            </div>
-           <h4 className="text-lg font-bold text-white mb-2">정말 불러오시겠습니까?</h4>
-           <p className="text-gray-400 text-sm mb-4">
-             새로운 데이터를 불러오면 <span className="text-red-400 font-bold">현재 작업 중인 내용이 덮어씌워지며</span>, 
-             저장하지 않은 변경 사항은 복구할 수 없습니다.
-           </p>
-           {confirmation.type === 'AUTOSAVE' && (
-             <div className="bg-[#383838] px-3 py-2 rounded border border-[#555] text-xs text-orange-200 flex items-center gap-2">
-                <RotateCcw size={12} />
-                자동 저장된 시점을 불러옵니다.
-             </div>
-           )}
-           {confirmation.type === 'IMPORT' && confirmation.file && (
-             <div className="bg-[#383838] px-3 py-2 rounded border border-[#555] text-xs text-gray-300 flex items-center gap-2 truncate max-w-full">
-                <Upload size={12} />
-                <span className="truncate">{confirmation.file.name}</span>
-             </div>
-           )}
         </div>
       </Modal>
     </>

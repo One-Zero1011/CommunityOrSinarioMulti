@@ -1,6 +1,5 @@
 
-
-import { ProbabilityProfile, ResultType } from '../types';
+import { ProbabilityProfile, ResultType, WeightedValue } from '../types';
 
 export const rollDice = (profile: ProbabilityProfile): ResultType => {
   const roll = Math.random() * 100;
@@ -35,6 +34,37 @@ export const getResultLabel = (type: ResultType): string => {
     case 'CRITICAL_FAILURE': return '대실패';
     default: return '';
   }
+};
+
+// --- Combat Logic Helper ---
+
+export const resolveWeightedStatValue = (statValue: number, mapping?: Record<number, WeightedValue[]>): number => {
+    // 1. If no mapping exists for this value, return the stat value itself (Default behavior)
+    if (!mapping) return statValue;
+
+    // 2. Check if specific mapping exists for this stat level
+    // Handle both number and string keys robustly
+    let entries = mapping[statValue];
+    if (!entries) {
+        // @ts-ignore
+        entries = mapping[String(statValue)];
+    }
+
+    if (!entries || entries.length === 0) return statValue; // Fallback if mapping exists but empty for this level
+
+    // 3. Weighted Random Selection
+    const totalWeight = entries.reduce((sum, entry) => sum + entry.weight, 0);
+    if (totalWeight <= 0) return entries[0].value; // Safety fallback
+
+    let random = Math.random() * totalWeight;
+    for (const entry of entries) {
+        if (random < entry.weight) {
+            return entry.value;
+        }
+        random -= entry.weight;
+    }
+
+    return entries[entries.length - 1].value;
 };
 
 // --- Faction Combat Logic ---

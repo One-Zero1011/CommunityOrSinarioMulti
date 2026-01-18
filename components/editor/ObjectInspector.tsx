@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapScene, MapObject, ShapeType, ResultType } from '../../types';
-import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X } from 'lucide-react';
+import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers } from 'lucide-react';
 import { blobToBase64 } from '../../lib/utils';
 import { ImageCropperModal, CropShape } from '../common/ImageCropperModal';
 
@@ -14,24 +14,27 @@ interface ObjectInspectorProps {
   onDeleteObject: (id: string) => void;
 }
 
-// Extracted Component to prevent re-mounting on every keystroke
+// Extracted Component for Outcome Editor
 const OutcomeEditor = ({ 
   label, 
   resultType, 
   color,
   selectedObject,
   onUpdateObject,
-  mapList 
+  mapList,
+  currentMap
 }: { 
   label: string, 
   resultType: ResultType, 
   color: string,
   selectedObject: MapObject,
   onUpdateObject: (id: string, updates: Partial<MapObject>) => void,
-  mapList: MapScene[]
+  mapList: MapScene[],
+  currentMap: MapScene | undefined
 }) => {
   if (!selectedObject.data) return null;
   const outcome = selectedObject.data.outcomes[resultType];
+  const mapObjects = currentMap?.objects.filter(o => o.id !== selectedObject.id) || [];
   
   return (
       <div className="p-2 bg-[#1e1e1e] rounded border border-[#444] mb-2">
@@ -84,27 +87,72 @@ const OutcomeEditor = ({
               />
           </div>
           
-          {/* Conditional Move Target */}
-          <div className="flex items-center gap-2">
-              <MapPin size={12} className="text-gray-500" />
-              <select 
-                 value={outcome.targetMapId || ''}
-                 onChange={(e) => onUpdateObject(selectedObject.id, { 
-                     data: { 
-                         ...selectedObject.data!, 
-                         outcomes: { 
-                             ...selectedObject.data!.outcomes, 
-                             [resultType]: { ...outcome, targetMapId: e.target.value || undefined } 
-                         } 
-                     } 
-                 })}
-                 className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-xs text-gray-200"
-              >
-                <option value="">(이동 없음)</option>
-                {mapList.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
+          <div className="space-y-1 mt-1">
+              <div className="flex items-center gap-2">
+                  <MapPin size={12} className="text-gray-500" />
+                  <select 
+                    value={outcome.targetMapId || ''}
+                    onChange={(e) => onUpdateObject(selectedObject.id, { 
+                        data: { 
+                            ...selectedObject.data!, 
+                            outcomes: { 
+                                ...selectedObject.data!.outcomes, 
+                                [resultType]: { ...outcome, targetMapId: e.target.value || undefined } 
+                            } 
+                        } 
+                    })}
+                    className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-gray-200"
+                  >
+                    <option value="">(이동 없음)</option>
+                    {mapList.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                  <Eye size={12} className="text-emerald-500" />
+                  <select 
+                    value={outcome.revealObjectId || ''}
+                    onChange={(e) => onUpdateObject(selectedObject.id, { 
+                        data: { 
+                            ...selectedObject.data!, 
+                            outcomes: { 
+                                ...selectedObject.data!.outcomes, 
+                                [resultType]: { ...outcome, revealObjectId: e.target.value || undefined } 
+                            } 
+                        } 
+                    })}
+                    className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-emerald-100"
+                  >
+                    <option value="">(활성화할 대상)</option>
+                    {mapObjects.map(o => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                  <EyeOff size={12} className="text-red-500" />
+                  <select 
+                    value={outcome.hideObjectId || ''}
+                    onChange={(e) => onUpdateObject(selectedObject.id, { 
+                        data: { 
+                            ...selectedObject.data!, 
+                            outcomes: { 
+                                ...selectedObject.data!.outcomes, 
+                                [resultType]: { ...outcome, hideObjectId: e.target.value || undefined } 
+                            } 
+                        } 
+                    })}
+                    className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-red-100"
+                  >
+                    <option value="">(비활성화할 대상)</option>
+                    {mapObjects.map(o => (
+                      <option key={o.id} value={o.id}>{o.label}</option>
+                    ))}
+                  </select>
+              </div>
           </div>
       </div>
   );
@@ -118,7 +166,6 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
   const [tempColor, setTempColor] = useState("#000000");
   const [tempOpacity, setTempOpacity] = useState(100);
 
-  // Crop State
   const [cropState, setCropState] = useState<{
     isOpen: boolean;
     file: File | null;
@@ -127,7 +174,6 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
     onConfirm: (base64: string) => void;
   }>({ isOpen: false, file: null, onConfirm: () => {} });
 
-  // Sync temp color state when selection changes
   useEffect(() => {
     if (selectedObject) {
        const rgbaMatch = selectedObject.color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/);
@@ -161,7 +207,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
   const handleImageUploadTrigger = (e: React.ChangeEvent<HTMLInputElement>, type: 'MAP_BG' | 'OBJ_IMG') => {
     if (e.target.files?.[0]) {
       const file = e.target.files[0];
-      e.target.value = ''; // Reset to allow same file selection
+      e.target.value = ''; 
       
       let initRatio: number | null = null;
       let initShape: CropShape = 'RECTANGLE';
@@ -191,12 +237,13 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
     }
   };
 
+  const mapObjectsExceptSelected = currentMap?.objects.filter(o => o.id !== selectedObject?.id) || [];
+
   return (
     <>
-      <div className="w-80 bg-[#252525] border-l border-[#444] flex flex-col p-4 overflow-y-auto text-gray-200">
+      <div className="w-80 bg-[#252525] border-l border-[#444] flex flex-col p-4 overflow-y-auto text-gray-200 custom-scrollbar">
         <h3 className="font-bold mb-4 text-gray-300">속성 (Properties)</h3>
         
-        {/* Map Properties */}
         <div className="mb-6 p-3 bg-[#1e1e1e] rounded space-y-3 border border-[#444]">
           <div>
             <label className="block text-xs uppercase text-gray-400 mb-1">맵 이름</label>
@@ -233,7 +280,6 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
           </div>
         </div>
 
-        {/* Object Properties */}
         {selectedObject ? (
           <div className="space-y-4">
             <div className="flex justify-between items-center pb-2 border-b border-[#444]">
@@ -245,17 +291,27 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
               </button>
             </div>
             
-            <div>
-              <label className="block text-xs uppercase text-gray-400 mb-1">이름 (라벨)</label>
-              <input 
-                type="text"
-                value={selectedObject.label}
-                onChange={(e) => onUpdateObject(selectedObject.id, { label: e.target.value })}
-                className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200"
-              />
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <label className="block text-xs uppercase text-gray-400 mb-1">이름 (라벨)</label>
+                <input 
+                  type="text"
+                  value={selectedObject.label}
+                  onChange={(e) => onUpdateObject(selectedObject.id, { label: e.target.value })}
+                  className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200"
+                />
+              </div>
+              <label className="flex flex-col items-center gap-1 cursor-pointer group">
+                  <span className="text-[10px] text-gray-500 font-bold uppercase">시작 시 숨김</span>
+                  <div 
+                    onClick={() => onUpdateObject(selectedObject.id, { hidden: !selectedObject.hidden })}
+                    className={`w-10 h-6 rounded-full p-1 transition-colors ${selectedObject.hidden ? 'bg-orange-600' : 'bg-gray-700'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full transition-transform ${selectedObject.hidden ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </div>
+              </label>
             </div>
 
-            {/* Appearance Section */}
             <div className="p-3 bg-[#1e1e1e] rounded border border-[#444] space-y-3">
                 <h4 className="text-xs font-bold text-gray-400 flex items-center gap-1">
                     <Palette size={12} /> 외형 (Appearance)
@@ -352,11 +408,9 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                 </div>
             </div>
             
-            {/* Main Logic Section */}
             {(selectedObject.type === 'OBJECT' || selectedObject.type === 'MAP_LINK') && (
               <div className="space-y-3 pt-2 border-t border-[#444]">
                 
-                {/* Interaction Type Selector */}
                 <div>
                     <label className="block text-xs font-bold text-gray-300 mb-2">상호작용 방식 (Interaction Mode)</label>
                     <div className="flex bg-[#1e1e1e] rounded p-1 gap-1 border border-[#444]">
@@ -375,7 +429,6 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                     </div>
                 </div>
 
-                {/* Unconditional Description */}
                 <div>
                   <label className="block text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
                       <FileText size={12} /> 설명 (Description)
@@ -389,30 +442,58 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                   />
                 </div>
 
-                {/* Standard Move Target (No Probability) */}
                 {!selectedObject.useProbability && (
-                    <div className="bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
-                        <label className="block text-xs font-bold text-indigo-300 mb-1 flex items-center gap-1">
-                            <MapPin size={12} /> 이동 대상 (Target Map)
-                        </label>
-                        <select 
-                            value={selectedObject.targetMapId || ''}
-                            onChange={(e) => onUpdateObject(selectedObject.id, { targetMapId: e.target.value || undefined })}
-                            className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200"
-                        >
-                          <option value="">(이동 없음)</option>
-                          {mapList.map(m => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </select>
-                        <p className="text-[10px] text-gray-400 mt-1 pl-1">
-                            * 설정 시 클릭하면 해당 맵으로 이동합니다.<br/>
-                            * 설명이 비어있으면 즉시 이동합니다.
-                        </p>
+                    <div className="bg-indigo-900/20 p-2 rounded border border-indigo-500/30 space-y-2">
+                        <div>
+                            <label className="block text-xs font-bold text-indigo-300 mb-1 flex items-center gap-1">
+                                <MapPin size={12} /> 이동 대상 (Target Map)
+                            </label>
+                            <select 
+                                value={selectedObject.targetMapId || ''}
+                                onChange={(e) => onUpdateObject(selectedObject.id, { targetMapId: e.target.value || undefined })}
+                                className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-xs text-gray-200"
+                            >
+                              <option value="">(이동 없음)</option>
+                              {mapList.map(m => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                              ))}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label className="block text-xs font-bold text-indigo-300 mb-1 flex items-center gap-1">
+                                <Layers size={12} /> 상호작용 시 자동 활성화 (Reveal)
+                            </label>
+                            <select 
+                                value={selectedObject.revealObjectId || ''}
+                                onChange={(e) => onUpdateObject(selectedObject.id, { revealObjectId: e.target.value || undefined })}
+                                className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-xs text-gray-200"
+                            >
+                              <option value="">(활성화할 대상 없음)</option>
+                              {mapObjectsExceptSelected.map(o => (
+                                <option key={o.id} value={o.id}>{o.label}</option>
+                              ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-indigo-300 mb-1 flex items-center gap-1">
+                                <Layers size={12} className="opacity-50" /> 상호작용 시 자동 비활성화 (Hide)
+                            </label>
+                            <select 
+                                value={selectedObject.hideObjectId || ''}
+                                onChange={(e) => onUpdateObject(selectedObject.id, { hideObjectId: e.target.value || undefined })}
+                                className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-xs text-gray-200"
+                            >
+                              <option value="">(비활성화할 대상 없음)</option>
+                              {mapObjectsExceptSelected.map(o => (
+                                <option key={o.id} value={o.id}>{o.label}</option>
+                              ))}
+                            </select>
+                        </div>
                     </div>
                 )}
 
-                {/* Conditional Logic (Probability) */}
                 {selectedObject.useProbability && selectedObject.data && (
                     <div className="space-y-3 animate-fade-in mt-2 border-t border-[#444] pt-2">
                         <p className="text-xs font-bold text-gray-300">판정 확률 (%)</p>
@@ -455,7 +536,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                             </div>
                         </div>
 
-                        <div className="mt-2 space-y-2">
+                        <div className="mt-2 space-y-2 pb-10">
                             <OutcomeEditor 
                               label="대성공" 
                               resultType="CRITICAL_SUCCESS" 
@@ -463,6 +544,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                               selectedObject={selectedObject}
                               onUpdateObject={onUpdateObject}
                               mapList={mapList}
+                              currentMap={currentMap}
                             />
                             <OutcomeEditor 
                               label="성공" 
@@ -471,6 +553,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                               selectedObject={selectedObject}
                               onUpdateObject={onUpdateObject}
                               mapList={mapList}
+                              currentMap={currentMap}
                             />
                             <OutcomeEditor 
                               label="실패" 
@@ -479,6 +562,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                               selectedObject={selectedObject}
                               onUpdateObject={onUpdateObject}
                               mapList={mapList}
+                              currentMap={currentMap}
                             />
                             <OutcomeEditor 
                               label="대실패" 
@@ -487,6 +571,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                               selectedObject={selectedObject}
                               onUpdateObject={onUpdateObject}
                               mapList={mapList}
+                              currentMap={currentMap}
                             />
                         </div>
                     </div>

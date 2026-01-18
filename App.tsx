@@ -7,19 +7,22 @@ import { MobileEditor } from './components/mobile/MobileEditor';
 import { FactionEditor } from './components/faction/FactionEditor';
 import { FactionPlayer } from './components/faction/FactionPlayer';
 import { MobileFactionPlayer } from './components/mobile/MobileFactionPlayer';
+import { CombatEditor } from './components/combat/CombatEditor';
+import { CombatPlayer } from './components/combat/CombatPlayer';
 import { Home } from './components/Home';
-import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA } from './lib/constants';
-import { GameData, FactionGameData } from './types';
-import { loadGameDataFromFile, loadFactionDataFromFile } from './lib/file-storage';
+import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA, INITIAL_COMBAT_DATA } from './lib/constants';
+import { GameData, FactionGameData, CombatGameData } from './types';
+import { loadGameDataFromFile, loadFactionDataFromFile, loadCombatDataFromFile } from './lib/file-storage';
 import { useNetwork } from './hooks/useNetwork';
 import { useIsMobile } from './hooks/useIsMobile';
 
-type AppMode = 'HOME' | 'EDITOR' | 'PLAYER' | 'FACTION_EDITOR' | 'FACTION_PLAYER';
+type AppMode = 'HOME' | 'EDITOR' | 'PLAYER' | 'FACTION_EDITOR' | 'FACTION_PLAYER' | 'COMBAT_EDITOR' | 'COMBAT_PLAYER';
 
 function App() {
   const [mode, setMode] = useState<AppMode>('HOME');
   const [gameData, setGameData] = useState<GameData>(INITIAL_GAME_DATA);
   const [factionData, setFactionData] = useState<FactionGameData>(INITIAL_FACTION_DATA);
+  const [combatData, setCombatData] = useState<CombatGameData>(INITIAL_COMBAT_DATA);
   const [loadedFileMessage, setLoadedFileMessage] = useState<string | null>(null);
   
   // Custom Hook for Network Logic
@@ -57,6 +60,20 @@ function App() {
       }
   };
 
+  const handleCombatDataLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          try {
+              const data = await loadCombatDataFromFile(file);
+              setCombatData(data);
+              setMode('COMBAT_PLAYER');
+          } catch (err) {
+              console.error(err);
+              alert(err instanceof Error ? err.message : '전투 데이터 로드 중 오류가 발생했습니다.');
+          }
+      }
+  };
+
   const handleStartHost = () => {
     network.startHost();
     setMode('PLAYER');
@@ -81,9 +98,14 @@ function App() {
           onStartHost={handleStartHost}
           onJoinGame={handleJoinGame}
           onLoadFile={handleDataLoad}
+          
           onStartFactionEditor={() => setMode('FACTION_EDITOR')}
           onLoadFactionFile={handleFactionDataLoad}
           onJoinFactionGame={handleJoinFactionGame}
+
+          onStartCombatEditor={() => setMode('COMBAT_EDITOR')}
+          onLoadCombatFile={handleCombatDataLoad}
+
           isConnecting={network.isConnecting}
           loadedFileMessage={loadedFileMessage}
         />
@@ -152,6 +174,19 @@ function App() {
                 }}
             />
           )
+      )}
+      {mode === 'COMBAT_EDITOR' && (
+          <CombatEditor 
+              initialData={combatData}
+              onSave={(d) => setCombatData(d)}
+              onBack={() => setMode('HOME')}
+          />
+      )}
+      {mode === 'COMBAT_PLAYER' && (
+          <CombatPlayer 
+              data={combatData}
+              onExit={() => setMode('HOME')}
+          />
       )}
     </>
   );
