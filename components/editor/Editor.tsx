@@ -62,20 +62,42 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
 
   const handleAddObject = (type: ObjectType) => {
     if (!currentMap) return;
+    
+    // Default properties based on type
+    let label = '장식';
+    let color = 'rgba(100, 116, 139, 0.8)';
+    let width = 100;
+    let height = 100;
+    
+    if (type === 'OBJECT') {
+        label = '조사 목표';
+        color = 'rgba(16, 185, 129, 0.8)';
+    } else if (type === 'MAP_LINK') {
+        label = '이동';
+        color = 'rgba(59, 130, 246, 0.8)';
+    } else if (type === 'SPAWN_POINT') {
+        label = '시작 위치';
+        color = 'rgba(139, 92, 246, 0.8)'; // Violet
+        width = 64;
+        height = 64;
+    }
+
     const newObj: MapObject = {
       id: generateId(),
       type,
-      label: type === 'MAP_LINK' ? '이동' : (type === 'OBJECT' ? '조사 목표' : '장식'),
-      x: 50,
-      y: 50,
-      width: 100,
-      height: 100,
-      color: type === 'MAP_LINK' ? 'rgba(59, 130, 246, 0.8)' : (type === 'OBJECT' ? 'rgba(16, 185, 129, 0.8)' : 'rgba(100, 116, 139, 0.8)'),
-      shape: 'RECTANGLE',
+      label,
+      x: 100,
+      y: 100,
+      width,
+      height,
+      color,
+      shape: type === 'SPAWN_POINT' ? 'CIRCLE' : 'RECTANGLE',
       description: '',
       useProbability: type === 'OBJECT',
       data: type === 'OBJECT' ? JSON.parse(JSON.stringify(DEFAULT_PROBABILITY)) : undefined,
-      targetMapId: type === 'MAP_LINK' ? (data.maps[0]?.id || '') : undefined
+      targetMapId: type === 'MAP_LINK' ? (data.maps[0]?.id || '') : undefined,
+      isSolid: false,
+      zIndex: 10
     };
     updateCurrentMap(m => ({ ...m, objects: [...m.objects, newObj] }));
     setSelectedObjectId(newObj.id);
@@ -156,6 +178,7 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
         onUpdateMap={handleUpdateMapProperties}
         onUpdateObject={handleUpdateObject}
         onDeleteObject={handleDeleteObject}
+        gameData={data}
       />
 
       {/* Image Cropper Modal */}

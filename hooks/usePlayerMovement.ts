@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Character, NetworkMode } from '../types';
+import { Character, NetworkMode, MapObject } from '../types';
 
 interface UsePlayerMovementProps {
   characters: Character[];
@@ -8,12 +8,13 @@ interface UsePlayerMovementProps {
   currentMapId: string;
   networkMode: NetworkMode;
   isModalOpen: boolean;
+  objects: MapObject[]; // Added to check for collisions
+  mapWidth?: number;  // New
+  mapHeight?: number; // New
   setCharacters: React.Dispatch<React.SetStateAction<Character[]>>;
   onSendMoveAction: (charId: string, x: number, y: number, mapId: string) => void;
 }
 
-const MAP_WIDTH = 1200;
-const MAP_HEIGHT = 800;
 const CHAR_SIZE = 64;
 const MOVE_SPEED = 4;
 
@@ -23,6 +24,9 @@ export const usePlayerMovement = ({
   currentMapId,
   networkMode,
   isModalOpen,
+  objects,
+  mapWidth = 1200, // Default fallback
+  mapHeight = 800, // Default fallback
   setCharacters,
   onSendMoveAction
 }: UsePlayerMovementProps) => {
@@ -37,6 +41,9 @@ export const usePlayerMovement = ({
       currentMapId,
       networkMode,
       isModalOpen,
+      objects,
+      mapWidth,
+      mapHeight,
       onSendMoveAction
   });
 
@@ -48,9 +55,12 @@ export const usePlayerMovement = ({
           currentMapId,
           networkMode,
           isModalOpen,
+          objects,
+          mapWidth,
+          mapHeight,
           onSendMoveAction
       };
-  }, [characters, activeCharId, currentMapId, networkMode, isModalOpen, onSendMoveAction]);
+  }, [characters, activeCharId, currentMapId, networkMode, isModalOpen, objects, mapWidth, mapHeight, onSendMoveAction]);
 
   // Key Event Listeners
   useEffect(() => {
@@ -75,6 +85,19 @@ export const usePlayerMovement = ({
         window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
+
+  // Helper for collision checking
+  const checkCollision = (x: number, y: number, objs: MapObject[]) => {
+      return objs.some(obj => {
+          if (!obj.isSolid || obj.hidden) return false;
+          return (
+              x < obj.x + obj.width &&
+              x + CHAR_SIZE > obj.x &&
+              y < obj.y + obj.height &&
+              y + CHAR_SIZE > obj.y
+          );
+      });
+  };
 
   // Game Loop
   const animate = useCallback(() => {
@@ -106,13 +129,24 @@ export const usePlayerMovement = ({
             }
 
             if (dx !== 0 || dy !== 0) {
-                const newX = Math.max(0, Math.min(MAP_WIDTH - CHAR_SIZE, char.x + dx));
-                const newY = Math.max(0, Math.min(MAP_HEIGHT - CHAR_SIZE, char.y + dy));
+                // Use dynamic map dimensions
+                let nextX = Math.max(0, Math.min(state.mapWidth - CHAR_SIZE, char.x + dx));
+                let nextY = Math.max(0, Math.min(state.mapHeight - CHAR_SIZE, char.y + dy));
+
+                // Collision Detection with individual axis check for sliding
+                // Check X axis
+                if (checkCollision(nextX, char.y, state.objects)) {
+                    nextX = char.x;
+                }
+                // Check Y axis
+                if (checkCollision(nextX, nextY, state.objects)) {
+                    nextY = char.y;
+                }
 
                 // Always update if position changed
-                if (newX !== char.x || newY !== char.y) {
+                if (nextX !== char.x || nextY !== char.y) {
                     // Update Logic
-                    const updatedChar = { ...char, x: newX, y: newY, mapId: state.currentMapId };
+                    const updatedChar = { ...char, x: nextX, y: nextY, mapId: state.currentMapId };
                     
                     // Create new characters array
                     const newCharacters = [...state.characters];
@@ -128,7 +162,7 @@ export const usePlayerMovement = ({
                     const now = Date.now();
                     if (now - lastSyncTime.current > 50) {
                         // Call action regardless of mode, let parent handle Host broadcasting
-                        state.onSendMoveAction(state.activeCharId, newX, newY, state.currentMapId);
+                        state.onSendMoveAction(state.activeCharId, nextX, nextY, state.currentMapId);
                         lastSyncTime.current = now;
                     }
                 }

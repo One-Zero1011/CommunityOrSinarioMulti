@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CombatGameData, CombatEntity, CombatRules, StatImpact } from '../../types';
-import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind } from 'lucide-react';
+import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind, Download, Clipboard, Check } from 'lucide-react';
 import { Button } from '../common/Button';
 import { generateId } from '../../lib/utils';
 import { resolveWeightedStatValue } from '../../lib/game-logic';
@@ -33,7 +33,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
     const [turnState, setTurnState] = useState<TurnState>('ACTION');
     
     // Detailed Reaction State
-    // Modified to track currentDamage separately from original roll
     const [pendingAction, setPendingAction] = useState<{ 
         sourceId: string, 
         targetId: string, 
@@ -46,6 +45,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
     const [coveringEntityId, setCoveringEntityId] = useState<string | null>(null);
 
     const [logs, setLogs] = useState<string[]>([]);
+    const [copied, setCopied] = useState(false);
 
     // -- Derived --
     const rules: CombatRules = data.rules || { initiativeStatId: '', turnOrder: 'INDIVIDUAL', allowDefend: false, allowCounter: false, allowCover: false, allowDodge: false };
@@ -57,10 +57,8 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         return (entity.stats[rules.deathStatId] || 0) <= 0;
     };
 
-    // -- Helper for display --
     const getMappedDisplay = (statId: string, val: number) => {
         const statDef = data.stats.find(s => s.id === statId);
-        // Robustly check for mapping in string or number keys
         const mapping = statDef?.valueMapping;
         if (!mapping) return null;
         
@@ -80,7 +78,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         return `${min}~${max}`;
     };
 
-    // -- Setup Functions --
     const handleAddEntity = () => {
         if(!newName.trim()) return;
         const initialStats: Record<string, number> = {};
@@ -88,10 +85,8 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         data.stats.forEach(s => {
             const rawVal = newStats[s.id] ?? s.defaultValue;
             
-            // Death Stat (HP) Logic:
-            // If this stat determines death, we resolve its value immediately (e.g. 1 -> 100)
-            // and store the resolved value as the stat value.
-            if (s.id === rules.deathStatId) {
+            // If the stat is marked as lookup mode, resolve its value immediately during initialization
+            if (s.isValueLookup) {
                 initialStats[s.id] = resolveWeightedStatValue(rawVal, s.valueMapping);
             } else {
                 initialStats[s.id] = rawVal;
@@ -107,6 +102,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         setEntities([...entities, newEntity]);
         setNewName('');
+        setNewStats({});
     };
 
     const handleRemoveEntity = (id: string) => {
@@ -150,7 +146,26 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev]);
     };
 
-    // -- Battle Functions --
+    const handleExportLogs = () => {
+        if (logs.length === 0) return;
+        const text = logs.slice().reverse().join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Combat_Log_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.txt`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handleCopyLogs = () => {
+        if (logs.length === 0) return;
+        const text = logs.slice().reverse().join('\n');
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
 
     const handleAction = (statId: string, targetId: string) => {
         if (!currentEntity) return;
@@ -159,12 +174,11 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         const statVal = currentEntity.stats[statId] || 0;
         
-        // Use Weighted Resolution logic
-        const roll = resolveWeightedStatValue(statVal, statDef.valueMapping);
+        // If stat is lookup, use value directly. If not, resolve weighted roll.
+        const roll = statDef.isValueLookup ? statVal : resolveWeightedStatValue(statVal, statDef.valueMapping);
         
         const impact = statDef.impacts?.[0]; 
 
-        // Check if impact is negative (Attack)
         if (impact && impact.operation === 'SUBTRACT') {
             setPendingAction({ 
                 sourceId: currentEntity.id, 
@@ -173,21 +187,19 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                 currentDamage: roll, 
                 impact 
             });
-            setReactionType(null); // Reset selection
+            setReactionType(null); 
             setCoveringEntityId(null);
             
-            // Phase Logic: Dodge -> Reaction -> Resolve
             if (rules.allowDodge) {
                 setTurnState('DODGE');
-                addLog(`waiting... ${currentEntity.name} 공격(위력:${roll})! -> 회피 판정 대기`);
+                addLog(`${currentEntity.name} 공격(위력:${roll})! -> 회피 판정 대기`);
             } else if (rules.allowDefend || rules.allowCounter || rules.allowCover) {
                 setTurnState('REACTION');
-                addLog(`waiting... ${currentEntity.name} 공격(위력:${roll})! -> 대응 선택 대기`);
+                addLog(`${currentEntity.name} 공격(위력:${roll})! -> 대응 선택 대기`);
             } else {
                 resolveAction(targetId, roll, impact);
             }
         } else {
-            // Self-buff or Heal, instant resolve
             resolveAction(targetId, roll, impact);
         }
     };
@@ -197,7 +209,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         const defender = entities.find(e => e.id === pendingAction.targetId);
         if (!defender) return;
 
-        // Determine Dodge Stat
         const dodgeStatId = rules.dodgeStatId;
         if (!dodgeStatId) {
             alert("회피에 사용할 스탯이 설정되지 않았습니다.");
@@ -207,28 +218,20 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         const statDef = data.stats.find(s => s.id === dodgeStatId);
         const statVal = defender.stats[dodgeStatId] || 0;
         
-        // NEW LOGIC: The result value IS the percentage chance.
-        const dodgeChance = resolveWeightedStatValue(statVal, statDef?.valueMapping);
-        
-        // Generate random roll (0.00 to 100.00)
+        const dodgeChance = statDef?.isValueLookup ? statVal : resolveWeightedStatValue(statVal, statDef?.valueMapping);
         const randomRoll = Math.random() * 100;
-
-        // Success if random roll is LESS than or EQUAL to dodge chance
         const isSuccess = randomRoll <= dodgeChance;
 
         if (isSuccess) {
             addLog(`💨 [회피 성공] 회피율 ${dodgeChance}% (Roll: ${randomRoll.toFixed(1)}) -> 데미지 무효화!`);
-            // Set currentDamage to 0, but continue to REACTION phase if possible
             setPendingAction(prev => prev ? ({ ...prev, currentDamage: 0 }) : null);
         } else {
             addLog(`💥 [회피 실패] 회피율 ${dodgeChance}% (Roll: ${randomRoll.toFixed(1)}) -> 실패`);
         }
 
-        // Always proceed to Reaction Phase if available
         if (rules.allowDefend || rules.allowCounter || rules.allowCover) {
             setTurnState('REACTION');
         } else {
-            // Resolve immediately
             resolveAction(pendingAction.targetId, isSuccess ? 0 : pendingAction.currentDamage, pendingAction.impact);
         }
     };
@@ -246,7 +249,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
     const executeReaction = () => {
         if (!pendingAction || !reactionType) return;
         
-        // Identify Roller & Stat
         const rollerId = reactionType === 'COVER' ? coveringEntityId : pendingAction.targetId;
         const roller = entities.find(e => e.id === rollerId);
         if (!roller) return;
@@ -256,9 +258,8 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         else if (reactionType === 'COUNTER') rollStatId = rules.counterStatId || '';
         else if (reactionType === 'COVER') rollStatId = rules.coverStatId || '';
 
-        // Fallback checks
         if (!rollStatId) {
-            alert("해당 대응 행동에 대한 스탯이 규칙에 설정되지 않았습니다. 에디터에서 설정해주세요.");
+            alert("해당 대응 행동에 대한 스탯이 규칙에 설정되지 않았습니다.");
             return;
         }
 
@@ -266,7 +267,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         if (!statDef) return;
 
         const rollVal = roller.stats[rollStatId] || 0;
-        const reactionRoll = resolveWeightedStatValue(rollVal, statDef.valueMapping);
+        const reactionRoll = statDef.isValueLookup ? rollVal : resolveWeightedStatValue(rollVal, statDef.valueMapping);
         
         const incomingDmg = pendingAction.currentDamage;
 
@@ -274,22 +275,13 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
             addLog(`🛡️ [방어] ${roller.name}의 ${statDef.label} 판정(${reactionRoll}): 데미지 ${incomingDmg} -> ${reducedDmg}`);
             resolveAction(pendingAction.targetId, reducedDmg, pendingAction.impact);
-
         } else if (reactionType === 'COUNTER') {
-            // Attacker takes reactionRoll damage
-            // Defender takes incomingDmg (which might be 0 if dodged)
             addLog(`⚔️ [반격] ${roller.name}의 ${statDef.label} 판정(${reactionRoll})으로 반격!`);
-            
-            // 1. Original target takes current damage (could be 0)
             resolveAction(pendingAction.targetId, incomingDmg, pendingAction.impact, false); 
-            // 2. Attacker takes counter damage
             resolveAction(pendingAction.sourceId, reactionRoll, pendingAction.impact, true);
-
         } else if (reactionType === 'COVER') {
-            // If dodged (dmg 0), cover takes 0 damage.
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
             addLog(`🛡️ [대리방어] ${roller.name}가 ${entities.find(e => e.id === pendingAction.targetId)?.name}을(를) 대신하여 맞습니다! (${statDef.label} 판정 ${reactionRoll}): 데미지 ${reducedDmg}`);
-            // Coverer takes the reduced damage
             resolveAction(rollerId!, reducedDmg, pendingAction.impact);
         }
     };
@@ -311,21 +303,16 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                 let newVal = currentVal;
                 
                 if (impact.operation === 'SUBTRACT') {
-                    // Min can be lower than statDef.min for HP (0 allowed for death)
-                    // If it is the death stat, min is 0. Else use statDef.min
                     const minLimit = (rules.deathStatId === impact.targetStatId) ? 0 : targetStatDef.min;
                     newVal = Math.max(minLimit, currentVal - amount);
                     addLog(`🩸 ${targetEntity.name}의 ${targetStatDef.label} -${amount} (${currentVal} -> ${newVal})`);
                     
-                    // Death Check
                     if (rules.deathStatId === impact.targetStatId && newVal <= 0) {
                         addLog(`💀 [사망] ${targetEntity.name}이(가) 쓰러졌습니다!`);
                     }
-
                 } else {
-                    
                     if (rules.deathStatId === impact.targetStatId) {
-                         newVal = currentVal + amount; // Uncapped healing for simplicity or cap at initial? Hard to track initial. Uncapped.
+                         newVal = currentVal + amount; 
                     } else {
                          newVal = Math.min(targetStatDef.max, currentVal + amount);
                     }
@@ -351,7 +338,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         let loopCount = 0;
         let found = false;
 
-        // Skip dead entities
         while(loopCount < turnQueue.length) {
             nextIndex = (nextIndex + 1) % turnQueue.length;
             const nextEntityId = turnQueue[nextIndex];
@@ -366,7 +352,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         if (!found) {
             addLog(`🏁 생존자가 없습니다. 전투 종료?`);
-            // Optional: End Game State
         } else {
             setCurrentTurnIndex(nextIndex);
             const nextEntityId = turnQueue[nextIndex];
@@ -375,7 +360,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         }
     };
 
-    // Helper to get allies for Cover
     const getPossibleCovers = (targetId: string) => {
         const target = entities.find(e => e.id === targetId);
         if(!target) return [];
@@ -384,21 +368,38 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
     return (
         <div className="flex flex-col h-screen bg-[#1a1a1a] text-gray-100 font-sans">
-            {/* Header */}
             <div className="h-14 bg-[#252525] border-b border-[#444] flex items-center justify-between px-6 shrink-0 shadow-md">
                 <div className="flex items-center gap-4">
                     <button onClick={onExit} className="text-gray-400 hover:text-white flex items-center gap-1"><ArrowLeft size={18} /> 종료</button>
                     <h1 className="font-bold text-lg text-rose-400">{data.title} - {phase === 'SETUP' ? '참가자 설정' : '전투 진행'}</h1>
                 </div>
-                {phase === 'BATTLE' && (
-                    <button onClick={() => setPhase('SETUP')} className="text-xs bg-gray-700 px-3 py-1 rounded hover:bg-gray-600">설정으로 복귀</button>
-                )}
+                <div className="flex items-center gap-2">
+                    {phase === 'BATTLE' && (
+                        <>
+                            <button 
+                                onClick={handleCopyLogs}
+                                className="text-xs bg-[#333] text-gray-300 px-3 py-1.5 rounded hover:bg-[#444] flex items-center gap-1.5 transition-colors border border-[#555]"
+                            >
+                                {copied ? <Check size={14} className="text-green-400" /> : <Clipboard size={14} />}
+                                로그 복사
+                            </button>
+                            <button 
+                                onClick={handleExportLogs}
+                                className="text-xs bg-[#333] text-gray-300 px-3 py-1.5 rounded hover:bg-[#444] flex items-center gap-1.5 transition-colors border border-[#555]"
+                            >
+                                <Download size={14} />
+                                다운로드 (.txt)
+                            </button>
+                            <div className="h-4 w-px bg-[#444] mx-1"></div>
+                            <button onClick={() => setPhase('SETUP')} className="text-xs bg-rose-900/30 text-rose-300 px-3 py-1.5 rounded hover:bg-rose-900/50 border border-rose-800/50">설정으로 복귀</button>
+                        </>
+                    )}
+                </div>
             </div>
 
             {phase === 'SETUP' && (
                 <div className="flex-1 overflow-auto p-8 flex flex-col items-center">
                     <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {/* Add Form */}
                         <div className="bg-[#252525] p-6 rounded-xl border border-[#444] shadow-lg h-fit">
                             <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><UserPlus/> 참가자 추가</h3>
                             <div className="space-y-4">
@@ -416,14 +417,21 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar border-t border-[#444] pt-2">
                                     <p className="text-xs text-gray-500 font-bold mb-2">초기 스탯 설정</p>
                                     {data.stats.map(s => (
-                                        <div key={s.id} className="flex justify-between items-center text-sm">
-                                            <span className="text-gray-300">{s.label}</span>
-                                            <input 
-                                                type="number"
-                                                value={newStats[s.id] ?? s.defaultValue}
-                                                onChange={(e) => setNewStats({...newStats, [s.id]: parseInt(e.target.value)})}
-                                                className="w-16 bg-[#333] border border-[#555] rounded px-1 py-0.5 text-center text-white"
-                                            />
+                                        <div key={s.id} className="flex flex-col gap-1 mb-2">
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span className="text-gray-300">{s.label} ({s.min}~{s.max} 단계)</span>
+                                                <input 
+                                                    type="number"
+                                                    value={newStats[s.id] ?? s.defaultValue}
+                                                    onChange={(e) => setNewStats({...newStats, [s.id]: parseInt(e.target.value)})}
+                                                    className="w-16 bg-[#333] border border-[#555] rounded px-1 py-0.5 text-center text-white"
+                                                />
+                                            </div>
+                                            {s.isValueLookup && (
+                                                <div className="text-[10px] text-gray-500 bg-black/20 p-1 rounded italic">
+                                                    * 변환 값: {getMappedDisplay(s.id, newStats[s.id] ?? s.defaultValue) || '-'}
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -431,7 +439,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                             </div>
                         </div>
 
-                        {/* List & Start */}
                         <div className="flex flex-col gap-4">
                             <div className="flex-1 bg-[#1e1e1e] p-4 rounded-xl border border-[#444] overflow-y-auto max-h-[500px]">
                                 <h3 className="font-bold text-gray-400 mb-3 flex justify-between">
@@ -457,7 +464,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
             {phase === 'BATTLE' && (
                 <div className="flex-1 flex flex-col overflow-hidden">
                     <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-                        {/* Left: Active Entity & Actions */}
                         <div className="w-full md:w-1/3 bg-[#252525] p-4 border-r border-[#444] flex flex-col relative overflow-y-auto">
                             <div className="mb-4 bg-black/40 p-3 rounded-lg border border-[#444] flex items-center justify-between">
                                 <div>
@@ -472,46 +478,49 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                 </div>
                             </div>
 
-                            {/* Action Panel */}
                             <div className="flex-1 overflow-y-auto">
                                 {turnState === 'ACTION' && currentEntity && (
                                     <div className="space-y-4 animate-fade-in">
                                         <p className="text-sm text-gray-400 font-bold mb-2">사용할 스탯 (행동)</p>
-                                        {data.stats.map(s => (
-                                            <div key={s.id} className="bg-[#333] p-3 rounded border border-[#555] hover:border-gray-400 transition-colors group">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <span className="font-bold text-gray-200">{s.label}</span>
-                                                    <div className="text-right">
-                                                        <span className="font-mono text-lg">{currentEntity.stats[s.id]}</span>
-                                                        {getMappedDisplay(s.id, currentEntity.stats[s.id]) && (
-                                                            <span className="text-xs text-gray-400 block">
-                                                                (위력: {getMappedDisplay(s.id, currentEntity.stats[s.id])})
-                                                            </span>
-                                                        )}
+                                        {data.stats.map(s => {
+                                            const statVal = currentEntity.stats[s.id];
+                                            const displayPower = getMappedDisplay(s.id, statVal);
+
+                                            return (
+                                                <div key={s.id} className="bg-[#333] p-3 rounded border border-[#555] hover:border-gray-400 transition-colors group">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <span className="font-bold text-gray-200">{s.label}</span>
+                                                        <div className="text-right">
+                                                            <span className="font-mono text-lg">{statVal}</span>
+                                                            {displayPower && !s.isValueLookup && (
+                                                                <span className="text-xs text-gray-400 block">
+                                                                    (위력: {displayPower})
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                     </div>
+                                                    {s.impacts && s.impacts.length > 0 ? (
+                                                        <div className="grid grid-cols-2 gap-2 mt-2">
+                                                            {entities.filter(e => e.id !== currentEntity.id && !isEntityDead(e)).map(target => (
+                                                                <button 
+                                                                    key={target.id}
+                                                                    onClick={() => handleAction(s.id, target.id)}
+                                                                    className={`text-xs py-2 rounded font-bold border transition-all ${target.team !== currentEntity.team ? 'bg-red-900/40 text-red-200 border-red-800 hover:bg-red-800' : 'bg-blue-900/40 text-blue-200 border-blue-800 hover:bg-blue-800'}`}
+                                                                >
+                                                                    {target.name}에게 사용
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <button onClick={() => handleAction(s.id, currentEntity.id)} className="w-full py-2 bg-gray-600 hover:bg-gray-500 rounded text-xs text-white">단독 판정 (Roll)</button>
+                                                    )}
                                                 </div>
-                                                {s.impacts && s.impacts.length > 0 ? (
-                                                    <div className="grid grid-cols-2 gap-2 mt-2">
-                                                        {entities.filter(e => e.id !== currentEntity.id && !isEntityDead(e)).map(target => (
-                                                            <button 
-                                                                key={target.id}
-                                                                onClick={() => handleAction(s.id, target.id)}
-                                                                className={`text-xs py-2 rounded font-bold border transition-all ${target.team !== currentEntity.team ? 'bg-red-900/40 text-red-200 border-red-800 hover:bg-red-800' : 'bg-blue-900/40 text-blue-200 border-blue-800 hover:bg-blue-800'}`}
-                                                            >
-                                                                {target.name}에게 사용
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <button onClick={() => handleAction(s.id, currentEntity.id)} className="w-full py-2 bg-gray-600 hover:bg-gray-500 rounded text-xs text-white">단독 판정 (Roll)</button>
-                                                )}
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                         <button onClick={nextTurn} className="w-full py-3 border border-gray-600 text-gray-400 rounded hover:bg-[#333] mt-4">턴 넘기기</button>
                                     </div>
                                 )}
 
-                                {/* DODGE PHASE UI */}
                                 {turnState === 'DODGE' && pendingAction && (
                                     <div className="space-y-4 animate-fade-in">
                                         <div className="bg-emerald-900/20 border border-emerald-500 p-4 rounded-xl text-center">
@@ -521,22 +530,15 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                                 <div className="text-xs text-gray-300 mt-1">들어오는 공격: <span className="font-mono text-lg font-bold text-red-400">{pendingAction.originalRoll}</span></div>
                                             </div>
                                         </div>
-                                        
                                         <button 
                                             onClick={handleDodge}
                                             className="w-full py-4 bg-emerald-700 hover:bg-emerald-600 rounded text-white font-bold flex items-center justify-center gap-2 shadow-lg"
                                         >
                                             <Wind size={24} /> 회피 시도
                                         </button>
-                                        
-                                        <p className="text-[10px] text-center text-gray-500">
-                                            * 스탯 값을 % 확률로 사용하여 회피를 시도합니다.<br/>
-                                            * (예: 스탯 결과값이 30이면 30% 확률로 회피)
-                                        </p>
                                     </div>
                                 )}
 
-                                {/* REACTION PHASE UI */}
                                 {turnState === 'REACTION' && pendingAction && (
                                     <div className="space-y-4 animate-fade-in">
                                         <div className="bg-red-900/20 border border-red-500 p-4 rounded-xl text-center">
@@ -588,16 +590,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                                     </span>
                                                     <button onClick={() => { setReactionType(null); setCoveringEntityId(null); }} className="text-xs text-gray-400 underline">취소</button>
                                                 </div>
-                                                
-                                                <button 
-                                                    onClick={executeReaction}
-                                                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold shadow-lg"
-                                                >
-                                                    확정 (설정된 스탯 사용)
-                                                </button>
-                                                <p className="text-[10px] text-gray-500 mt-2 text-center">
-                                                    * 에디터에서 설정한 규칙에 따라 해당 스탯으로 판정합니다.
-                                                </p>
+                                                <button onClick={executeReaction} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold shadow-lg">확정</button>
                                             </div>
                                         )}
                                     </div>
@@ -605,7 +598,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                             </div>
                         </div>
 
-                        {/* Right: Battlefield Status */}
                         <div className="flex-1 flex flex-col p-4 overflow-y-auto bg-[#1a1a1a]">
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 content-start">
                                 {entities.map(ent => {
@@ -637,7 +629,6 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                         </div>
                     </div>
 
-                    {/* Bottom: Logs (New Full-width Area) */}
                     <div className="h-72 bg-black border-t-2 border-[#444] p-4 overflow-y-auto font-mono shadow-2xl z-10 shrink-0">
                         <div className="flex flex-col-reverse justify-end min-h-full">
                              {logs.map((log, i) => (

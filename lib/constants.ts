@@ -17,6 +17,8 @@ export const DEFAULT_PROBABILITY: ProbabilityProfile = {
 export const DEFAULT_MAP: MapScene = {
   id: 'map_001',
   name: '입구',
+  width: 1200,
+  height: 800,
   objects: [],
 };
 

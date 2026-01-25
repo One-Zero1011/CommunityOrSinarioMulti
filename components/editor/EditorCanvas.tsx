@@ -1,5 +1,5 @@
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import { MapScene, MapObject } from '../../types';
 import { getShapeStyle } from '../../lib/styles';
 import { Move } from 'lucide-react';
@@ -19,6 +19,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
   const objectStart = useRef<{ x: number, y: number } | null>(null);
   const dragDidMove = useRef(false);
   const wasSelectedOnDown = useRef(false);
+
+  const sortedObjects = useMemo(() => {
+    if (!currentMap) return [];
+    return [...currentMap.objects].sort((a, b) => (a.zIndex ?? 10) - (b.zIndex ?? 10));
+  }, [currentMap]);
 
   const handleMouseDown = (e: React.MouseEvent, obj: MapObject) => {
     e.stopPropagation();
@@ -68,10 +73,10 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
     >
       {currentMap && (
         <div 
-          className="relative shadow-2xl bg-[#2e2e2e] shrink-0 border border-[#444]"
+          className="relative shadow-2xl bg-[#2e2e2e] shrink-0 border border-[#444] transition-all duration-300"
           style={{ 
-            width: '1200px',
-            height: '800px',
+            width: `${currentMap.width || 1200}px`,
+            height: `${currentMap.height || 800}px`,
             backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none',
             backgroundSize: 'cover',
             backgroundPosition: 'center'
@@ -81,11 +86,11 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
            {!currentMap.bgImage && (
              <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 pointer-events-none gap-2">
                <p>배경 이미지가 없습니다.</p>
-               <p className="text-sm opacity-50">1200 x 800</p>
+               <p className="text-sm opacity-50">{currentMap.width || 1200} x {currentMap.height || 800}</p>
              </div>
            )}
            
-           {currentMap.objects.map(obj => (
+           {sortedObjects.map(obj => (
              <div
                 key={obj.id}
                 onMouseDown={(e) => handleMouseDown(e, obj)}
@@ -96,7 +101,7 @@ export const EditorCanvas: React.FC<EditorCanvasProps> = ({
                   top: obj.y,
                   width: obj.width,
                   height: obj.height,
-                  zIndex: selectedObjectId === obj.id ? 10 : 1
+                  zIndex: selectedObjectId === obj.id ? 1000 : (obj.zIndex ?? 10)
                 }}
              >
                 {/* Visual Shape Representation */}

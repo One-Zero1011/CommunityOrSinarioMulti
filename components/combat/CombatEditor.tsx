@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CombatGameData, CombatStatDef, StatImpact, CombatRules, WeightedValue } from '../../types';
-import { ArrowLeft, Plus, Save, Trash2, Sliders, Edit2, ChevronDown, ChevronUp, Table, Zap, Target, Settings, GitCompare, ShieldAlert, Shield, Sword, Users, Skull, BarChart2, X, PieChart, Wind } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2, Sliders, Edit2, ChevronDown, ChevronUp, Table, Zap, Target, Settings, GitCompare, ShieldAlert, Shield, Sword, Users, Skull, BarChart2, X, PieChart, Wind, ToggleRight, ToggleLeft } from 'lucide-react';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { generateId } from '../../lib/utils';
@@ -29,6 +29,7 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
             min: 1,
             max: 5,
             defaultValue: 3,
+            isValueLookup: false,
             valueMapping: {},
             impacts: []
         };
@@ -61,7 +62,6 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
         const stat = data.stats.find(s => s.id === statId);
         if (!stat) return;
         
-        // Backward compatibility check or init
         const currentEntries = stat.valueMapping?.[level] || [];
         setEditingMapping({ statId, level, entries: currentEntries.length > 0 ? currentEntries : [{ value: 0, weight: 1 }] });
     };
@@ -72,8 +72,6 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
         if (!stat) return;
 
         const newMapping = { ...(stat.valueMapping || {}) };
-        
-        // Filter out empty/invalid entries if needed, but keeping simple
         const validEntries = editingMapping.entries.filter(e => e.weight > 0);
         
         if (validEntries.length > 0) {
@@ -205,7 +203,10 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                     onClick={() => { setSelectedStatId(stat.id); setShowMapping(false); setShowImpacts(false); }}
                                     className={`p-3 rounded border cursor-pointer flex justify-between items-center transition-all ${selectedStatId === stat.id ? 'bg-rose-900/40 border-rose-500 text-white' : 'bg-[#333] border-[#444] text-gray-400 hover:border-gray-300'}`}
                                 >
-                                    <span className="font-bold text-sm">{stat.label}</span>
+                                    <div className="flex flex-col">
+                                        <span className="font-bold text-sm">{stat.label}</span>
+                                        {stat.isValueLookup && <span className="text-[10px] text-rose-300 font-bold uppercase tracking-tighter">Value Lookup ON</span>}
+                                    </div>
                                     <span className="text-xs bg-black/30 px-2 py-0.5 rounded">{stat.min} ~ {stat.max}</span>
                                 </div>
                             ))}
@@ -252,9 +253,29 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                     />
                                 </div>
 
+                                <div className="p-4 rounded-xl border border-rose-500/20 bg-rose-900/10">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <h4 className="text-sm font-bold text-rose-300 flex items-center gap-2">
+                                                <Target size={14}/> 값 변환 모드 (Value Lookup)
+                                            </h4>
+                                            <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">
+                                                활성화 시, 캐릭터 생성 단계에서 선택한 스탯 수치가<br/>
+                                                매핑된 실제 값으로 즉시 고정 변환됩니다. (예: HP)
+                                            </p>
+                                        </div>
+                                        <button 
+                                            onClick={() => handleUpdateStat(selectedStat.id, { isValueLookup: !selectedStat.isValueLookup })}
+                                            className="focus:outline-none transition-transform active:scale-95"
+                                        >
+                                            {selectedStat.isValueLookup ? <ToggleRight size={40} className="text-rose-500" /> : <ToggleLeft size={40} className="text-gray-600" />}
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <div className="grid grid-cols-2 gap-6">
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-400 mb-2">최소값 (Min)</label>
+                                        <label className="block text-sm font-bold text-gray-400 mb-2">단계 범위 (Min)</label>
                                         <input 
                                             type="number" 
                                             value={selectedStat.min}
@@ -263,7 +284,7 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-400 mb-2">최대값 (Max)</label>
+                                        <label className="block text-sm font-bold text-gray-400 mb-2">단계 범위 (Max)</label>
                                         <input 
                                             type="number" 
                                             value={selectedStat.max}
@@ -274,7 +295,7 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-400 mb-2">기본값 (Default)</label>
+                                    <label className="block text-sm font-bold text-gray-400 mb-2">기본 단계 (Default)</label>
                                     <div className="flex items-center gap-4">
                                         <input 
                                             type="range"
@@ -294,35 +315,40 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                         onClick={() => setShowMapping(!showMapping)}
                                         className="w-full flex items-center justify-between text-left text-sm font-bold text-gray-300 hover:text-white p-2 rounded hover:bg-[#333] transition-colors"
                                     >
-                                        <span className="flex items-center gap-2"><Table size={14}/> 값 매핑 설정 (Value Mapping)</span>
+                                        <span className="flex items-center gap-2">
+                                            <Table size={14}/> 
+                                            {selectedStat.isValueLookup ? '고정 값 매핑 설정 (Lookup Table)' : '확률/수치 매핑 설정 (Value Mapping)'}
+                                        </span>
                                         {showMapping ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
                                     </button>
                                     
                                     {showMapping && (
                                         <div className="mt-3 bg-[#1e1e1e] p-4 rounded border border-[#444] animate-fade-in max-h-60 overflow-y-auto custom-scrollbar">
-                                            <p className="text-xs text-gray-500 mb-3">
-                                                스탯 수치별 결과값을 설정합니다. 그래프 버튼을 눌러 확률을 조정하세요.
+                                            <p className="text-xs text-gray-500 mb-3 italic">
+                                                {selectedStat.isValueLookup 
+                                                    ? "각 단계별로 변환될 최종 고정값을 입력하세요."
+                                                    : "스탯 수치별 결과값을 설정합니다. 그래프 버튼을 눌러 확률을 조정하세요."}
                                             </p>
                                             <div className="grid grid-cols-1 gap-2">
                                                 {mappingRange.map(val => {
                                                     const mappings = selectedStat.valueMapping?.[val] || [];
                                                     const display = mappings.length > 0 
                                                         ? mappings.map(m => `${m.value}`).join(', ') 
-                                                        : "(기본값 사용)";
+                                                        : "(미설정)";
                                                     
                                                     return (
                                                         <div key={val} className="flex items-center gap-2 bg-[#252525] p-2 rounded border border-[#333]">
                                                             <div className="w-8 h-8 rounded bg-[#333] flex items-center justify-center font-bold font-mono text-sm text-gray-400">{val}</div>
                                                             <div className="flex-1 text-xs text-gray-300 truncate">
                                                                 ➔ <span className="font-mono font-bold text-white">{display}</span>
-                                                                {mappings.length > 1 && <span className="text-gray-500 ml-2">({mappings.length}개 확률)</span>}
+                                                                {mappings.length > 1 && !selectedStat.isValueLookup && <span className="text-gray-500 ml-2">({mappings.length}개 확률)</span>}
                                                             </div>
                                                             <button 
                                                                 onClick={() => openMappingEditor(selectedStat.id, val)}
-                                                                className={`p-1.5 rounded hover:bg-[#444] transition-colors ${mappings.length > 0 ? 'text-indigo-400' : 'text-gray-600'}`}
-                                                                title="확률 설정"
+                                                                className={`p-1.5 rounded hover:bg-[#444] transition-colors ${mappings.length > 0 ? (selectedStat.isValueLookup ? 'text-rose-400' : 'text-indigo-400') : 'text-gray-600'}`}
+                                                                title={selectedStat.isValueLookup ? "값 설정" : "확률 설정"}
                                                             >
-                                                                <BarChart2 size={16} />
+                                                                {selectedStat.isValueLookup ? <Edit2 size={16} /> : <BarChart2 size={16} />}
                                                             </button>
                                                         </div>
                                                     );
@@ -400,7 +426,6 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                         </div>
 
                         <div className="space-y-8">
-                            {/* ... Rules UI ... */}
                             <div>
                                 <label className="block text-sm font-bold text-gray-400 mb-2 flex items-center gap-2">
                                     <Zap size={14}/> 선공 결정 스탯 (Initiative)
@@ -427,10 +452,11 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                     className="w-full bg-[#333] border border-[#555] rounded px-4 py-3 text-white focus:border-orange-500 outline-none"
                                 >
                                     <option value="">(설정 안 함 - 죽음 없음)</option>
-                                    {data.stats.map(s => (
+                                    {data.stats.filter(s => s.isValueLookup).map(s => (
                                         <option key={s.id} value={s.id}>{s.label}</option>
                                     ))}
                                 </select>
+                                <p className="text-[10px] text-gray-500 mt-1">* '값 변환 모드'가 활성화된 스탯만 선택 가능합니다.</p>
                             </div>
 
                             <div>
@@ -557,7 +583,7 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
             <Modal
                 isOpen={!!editingMapping}
                 onClose={() => setEditingMapping(null)}
-                title="값 매핑 및 확률 설정"
+                title={selectedStat?.isValueLookup ? "고정 값 설정" : "확률/결과 매핑 설정"}
                 maxWidth="max-w-xl"
                 footer={<div className="flex gap-2"><Button variant="ghost" onClick={() => setEditingMapping(null)}>취소</Button><Button onClick={saveMapping}>저장</Button></div>}
             >
@@ -566,15 +592,21 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                     return (
                         <div className="space-y-6 p-2">
                             <div className="flex items-center gap-2 mb-4 bg-black/30 p-2 rounded text-sm text-gray-300">
-                                <span className="font-bold text-white">스탯 수치: {editingMapping.level}</span> 일 때, 아래 결과 중 하나가 선택됩니다.
+                                <span className="font-bold text-white">스탯 단계: {editingMapping.level}</span>
+                                {selectedStat?.isValueLookup 
+                                    ? " 일 때 변환될 값을 설정하세요." 
+                                    : " 일 때 발생할 결과 확률을 설정하세요."}
                             </div>
 
                             <div className="space-y-2">
-                                {/* ... existing mapping UI ... */}
                                 <div className="flex text-xs font-bold text-gray-500 px-2">
                                     <span className="w-24">결과값 (Value)</span>
-                                    <span className="w-24">가중치 (Weight)</span>
-                                    <span className="flex-1">확률 (%)</span>
+                                    {!selectedStat?.isValueLookup && (
+                                        <>
+                                            <span className="w-24">가중치 (Weight)</span>
+                                            <span className="flex-1">확률 (%)</span>
+                                        </>
+                                    )}
                                     <span className="w-8"></span>
                                 </div>
                                 {editingMapping.entries.map((entry, idx) => {
@@ -588,67 +620,77 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                                 className="w-24 bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono"
                                                 placeholder="Value"
                                             />
-                                            <input 
-                                                type="number"
-                                                value={entry.weight}
-                                                onChange={(e) => updateMappingEntry(idx, 'weight', Math.max(0, parseInt(e.target.value) || 0))}
-                                                className="w-24 bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono"
-                                                placeholder="Weight"
-                                            />
-                                            <div className="flex-1 h-6 bg-gray-800 rounded overflow-hidden relative">
-                                                <div 
-                                                    className="h-full bg-indigo-600 transition-all"
-                                                    style={{ width: `${percent}%` }}
-                                                ></div>
-                                                <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white drop-shadow-md">
-                                                    {percent.toFixed(1)}%
-                                                </span>
-                                            </div>
-                                            <button onClick={() => removeMappingEntry(idx)} className="text-gray-500 hover:text-red-400">
-                                                <X size={16} />
-                                            </button>
+                                            {!selectedStat?.isValueLookup && (
+                                                <>
+                                                    <input 
+                                                        type="number"
+                                                        value={entry.weight}
+                                                        onChange={(e) => updateMappingEntry(idx, 'weight', Math.max(0, parseInt(e.target.value) || 0))}
+                                                        className="w-24 bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono"
+                                                        placeholder="Weight"
+                                                    />
+                                                    <div className="flex-1 h-6 bg-gray-800 rounded overflow-hidden relative">
+                                                        <div 
+                                                            className="h-full bg-indigo-600 transition-all"
+                                                            style={{ width: `${percent}%` }}
+                                                        ></div>
+                                                        <span className="absolute inset-0 flex items-center justify-center text-[10px] text-white drop-shadow-md">
+                                                            {percent.toFixed(1)}%
+                                                        </span>
+                                                    </div>
+                                                </>
+                                            )}
+                                            {(!selectedStat?.isValueLookup || editingMapping.entries.length > 1) && (
+                                                <button onClick={() => removeMappingEntry(idx)} className="text-gray-500 hover:text-red-400">
+                                                    <X size={16} />
+                                                </button>
+                                            )}
                                         </div>
                                     );
                                 })}
-                                <button 
-                                    onClick={addMappingEntry}
-                                    className="w-full py-2 border border-dashed border-[#555] rounded text-gray-400 hover:text-white hover:bg-[#333] flex items-center justify-center gap-1 text-xs"
-                                >
-                                    <Plus size={14} /> 항목 추가
-                                </button>
+                                {!selectedStat?.isValueLookup && (
+                                    <button 
+                                        onClick={addMappingEntry}
+                                        className="w-full py-2 border border-dashed border-[#555] rounded text-gray-400 hover:text-white hover:bg-[#333] flex items-center justify-center gap-1 text-xs"
+                                    >
+                                        <Plus size={14} /> 항목 추가
+                                    </button>
+                                )}
                             </div>
 
-                            {/* Chart Visualization */}
-                            <div className="bg-[#1e1e1e] p-4 rounded border border-[#444]">
-                                <h4 className="text-xs font-bold text-gray-400 mb-2 flex items-center gap-2"><PieChart size={14}/> 확률 분포</h4>
-                                <div className="h-4 bg-gray-800 rounded-full flex overflow-hidden">
-                                    {editingMapping.entries.map((entry, idx) => {
-                                        const percent = totalWeight > 0 ? (entry.weight / totalWeight) * 100 : 0;
-                                        if (percent <= 0) return null;
-                                        const hue = (idx * 137.5) % 360; 
-                                        return (
-                                            <div 
-                                                key={idx}
-                                                className="h-full transition-all flex items-center justify-center relative group"
-                                                style={{ width: `${percent}%`, backgroundColor: `hsl(${hue}, 60%, 50%)` }}
-                                                title={`Value: ${entry.value} (${percent.toFixed(1)}%)`}
-                                            >
-                                            </div>
-                                        );
-                                    })}
+                            {/* Chart Visualization - Only for non-lookup */}
+                            {!selectedStat?.isValueLookup && (
+                                <div className="bg-[#1e1e1e] p-4 rounded border border-[#444]">
+                                    <h4 className="text-xs font-bold text-gray-400 mb-2 flex items-center gap-2"><PieChart size={14}/> 확률 분포</h4>
+                                    <div className="h-4 bg-gray-800 rounded-full flex overflow-hidden">
+                                        {editingMapping.entries.map((entry, idx) => {
+                                            const percent = totalWeight > 0 ? (entry.weight / totalWeight) * 100 : 0;
+                                            if (percent <= 0) return null;
+                                            const hue = (idx * 137.5) % 360; 
+                                            return (
+                                                <div 
+                                                    key={idx}
+                                                    className="h-full transition-all flex items-center justify-center relative group"
+                                                    style={{ width: `${percent}%`, backgroundColor: `hsl(${hue}, 60%, 50%)` }}
+                                                    title={`Value: ${entry.value} (${percent.toFixed(1)}%)`}
+                                                >
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 mt-2">
+                                        {editingMapping.entries.map((entry, idx) => {
+                                            const hue = (idx * 137.5) % 360;
+                                            return (
+                                                <div key={idx} className="flex items-center gap-1 text-[10px] text-gray-400">
+                                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: `hsl(${hue}, 60%, 50%)` }}></div>
+                                                    <span>Val {entry.value}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
                                 </div>
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                    {editingMapping.entries.map((entry, idx) => {
-                                        const hue = (idx * 137.5) % 360;
-                                        return (
-                                            <div key={idx} className="flex items-center gap-1 text-[10px] text-gray-400">
-                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: `hsl(${hue}, 60%, 50%)` }}></div>
-                                                <span>Val {entry.value}</span>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            </div>
+                            )}
                         </div>
                     );
                 })()}

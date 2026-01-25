@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GameData, MapObject, Character, ChatMessage, ResultType, OutcomeDef } from '../../types';
 import { useNetwork } from '../../hooks/useNetwork';
 import { PlayerHUD } from '../player/PlayerHUD';
@@ -64,17 +64,42 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
   const visibleCharacters = characters.filter(c => c.mapId === currentMapId || (!c.mapId && currentMapId === gameData.startMapId));
   const visibleObjects = currentMap?.objects.filter(obj => isAdmin || !obj.hidden) || [];
 
+  // Map Dimensions
+  const mapW = currentMap?.width || 1200;
+  const mapH = currentMap?.height || 800;
+
+  const renderList = useMemo(() => {
+    const list: (({ type: 'OBJ', data: MapObject }) | ({ type: 'CHAR', data: Character }))[] = [];
+    visibleObjects.forEach(obj => list.push({ type: 'OBJ', data: obj }));
+    visibleCharacters.forEach(char => list.push({ type: 'CHAR', data: char }));
+    
+    return list.sort((a, b) => {
+        const zA = a.type === 'OBJ' ? (a.data.zIndex ?? 10) : 50;
+        const zB = b.type === 'OBJ' ? (b.data.zIndex ?? 10) : 50;
+        return zA - zB;
+    });
+  }, [visibleObjects, visibleCharacters]);
+
   useEffect(() => { if (activeChar && activeChar.mapId && activeChar.mapId !== currentMapId) setCurrentMapId(activeChar.mapId); }, [activeChar?.mapId, activeCharId, currentMapId]);
 
   useEffect(() => {
     const updateScale = () => {
         if (mapContainerRef.current) {
             const { width, height } = mapContainerRef.current.getBoundingClientRect();
-            setScale(Math.min(width / 1200, height / 800, 1));
+            // Calculate scale based on current map dimensions
+            setScale(Math.min(width / mapW, height / mapH, 1));
         }
     };
     updateScale(); window.addEventListener('resize', updateScale); return () => window.removeEventListener('resize', updateScale);
-  }, []);
+  }, [mapW, mapH]);
+
+  const getSpawnPosition = (mapId: string) => {
+      const map = stateRef.current.gameData.maps.find(m => m.id === mapId);
+      if (!map) return { x: 100, y: 400 };
+      const spawn = map.objects.find(o => o.type === 'SPAWN_POINT');
+      if (spawn) return { x: spawn.x, y: spawn.y };
+      return { x: 100, y: 400 };
+  };
 
   useEffect(() => {
     const handleAction = (data: any) => {
@@ -144,20 +169,24 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
   };
   const handleSummonPlayer = (targetId: string | 'ALL') => {
       if (!isAdmin) return;
+      const pos = getSpawnPosition(currentMapId);
       const exe = (charId: string) => {
-          if (networkMode === 'HOST') { setCharacters(prev => prev.map(c => c.id === charId ? { ...c, mapId: currentMapId, x: 100, y: 400 } : c)); broadcast({ type: 'ON_MOVE_CHAR', charId, x: 100, y: 400, mapId: currentMapId }); }
-          else sendToHost({ type: 'REQUEST_MOVE_CHAR', charId, x: 100, y: 400, mapId: currentMapId });
+          if (networkMode === 'HOST') { setCharacters(prev => prev.map(c => c.id === charId ? { ...c, mapId: currentMapId, x: pos.x, y: pos.y } : c)); broadcast({ type: 'ON_MOVE_CHAR', charId, x: pos.x, y: pos.y, mapId: currentMapId }); }
+          else sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: charId, x: pos.x, y: pos.y, mapId: currentMapId });
       };
       if (targetId === 'ALL') characters.forEach(c => exe(targetId)); else exe(targetId);
   };
   const handleMoveLogic = (mapId: string) => {
     if (stateRef.current.gameData.maps.find(m => m.id === mapId)) {
-        setCurrentMapId(mapId); setInteractionResult(null); setCharacters(prev => prev.map(c => c.id === activeCharId ? {...c, mapId: mapId, x: 100, y: 400} : c));
-        if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: activeCharId, x: 100, y: 400, mapId: mapId });
-        else broadcast({ type: 'ON_MOVE_CHAR', charId: activeCharId, x: 100, y: 400, mapId: mapId });
+        setCurrentMapId(mapId); setInteractionResult(null); 
+        const pos = getSpawnPosition(mapId);
+        setCharacters(prev => prev.map(c => c.id === activeCharId ? {...c, mapId: mapId, x: pos.x, y: pos.y} : c));
+        if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_MOVE_CHAR', charId: activeCharId, x: pos.x, y: pos.y, mapId: mapId });
+        else broadcast({ type: 'ON_MOVE_CHAR', charId: activeCharId, x: pos.x, y: pos.y, mapId: mapId });
     }
   };
   const handleObjectClickLogic = (obj: MapObject) => {
+    if (obj.type === 'SPAWN_POINT') return;
     if ((obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId)) && (!obj.description || obj.description.trim() === '')) { if (obj.targetMapId) { handleMoveLogic(obj.targetMapId); return; } }
     let res: any = { objectName: obj.label, description: obj.description, hasRoll: false };
     if (obj.useProbability && obj.data) {
@@ -170,14 +199,13 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
     setInteractionResult(res);
   };
 
-  // Add missing wrappers for components using them
   const handleObjectClick = (obj: MapObject) => {
     if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
     else handleObjectClickLogic(obj);
   };
 
-  // Consolidation of character creation logic to fix type error in networking
   const handleAddCharacterLogic = () => {
+    const pos = getSpawnPosition(stateRef.current.currentMapId);
     const newChar: Character = { 
         id: `char_${generateId()}`, 
         name: `탐사자 ${stateRef.current.characters.length + 1}`, 
@@ -186,8 +214,8 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
         maxHp: 100, 
         inventory: [], 
         mapId: stateRef.current.currentMapId, 
-        x: 100, 
-        y: 400 
+        x: pos.x, 
+        y: pos.y 
     };
     setCharacters(prev => [...prev, newChar]);
     if (networkMode === 'HOST') { 
@@ -212,16 +240,41 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
     else handleToggleVisibilityLogic(mapId, objectId, hidden);
   };
 
+  const checkCollision = (x: number, y: number, objs: MapObject[]) => {
+    return objs.some(obj => {
+        if (!obj.isSolid || obj.hidden) return false;
+        return (
+            x < obj.x + obj.width &&
+            x + CHAR_SIZE > obj.x &&
+            y < obj.y + obj.height &&
+            y + CHAR_SIZE > obj.y
+        );
+    });
+  };
+
   const animate = useCallback(() => {
-      const { characters: currentChars, activeCharId: activeId, currentMapId: mapId } = stateRef.current;
+      const { characters: currentChars, activeCharId: activeId, currentMapId: mapId, gameData } = stateRef.current;
+      const currentMap = gameData.maps.find(m => m.id === mapId);
+      const objects = currentMap?.objects || [];
+      const mWidth = currentMap?.width || 1200;
+      const mHeight = currentMap?.height || 800;
+
       const lerp = (s: number, e: number, t: number) => s + (e - s) * t;
       let changed = false;
       const inputs = inputRef.current; const charIdx = currentChars.findIndex(c => c.id === activeId);
+      
       if (charIdx !== -1 && (inputs.w || inputs.a || inputs.s || inputs.d)) {
           const char = currentChars[charIdx]; let dx = 0, dy = 0;
           if (inputs.w) dy -= MOVE_SPEED; if (inputs.s) dy += MOVE_SPEED; if (inputs.a) dx -= MOVE_SPEED; if (inputs.d) dx += MOVE_SPEED;
           if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
-          const nx = Math.max(0, Math.min(1200 - CHAR_SIZE, char.x + dx)); const ny = Math.max(0, Math.min(800 - CHAR_SIZE, char.y + dy));
+          
+          let nx = Math.max(0, Math.min(mWidth - CHAR_SIZE, char.x + dx)); 
+          let ny = Math.max(0, Math.min(mHeight - CHAR_SIZE, char.y + dy));
+
+          // Collision check
+          if (checkCollision(nx, char.y, objects)) nx = char.x;
+          if (checkCollision(nx, ny, objects)) ny = char.y;
+
           if (nx !== char.x || ny !== char.y) {
               currentChars[charIdx] = { ...char, x: nx, y: ny, mapId }; changed = true;
               if (Date.now() - lastSyncTime.current > 50) {
@@ -244,19 +297,38 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
       <PlayerHUD currentMapName={currentMap?.name || ''} onExit={onExit} isAdmin={isAdmin} />
       <div ref={mapContainerRef} className="flex-1 relative overflow-hidden bg-[#1a1a1a] flex items-center justify-center">
          {currentMap ? (
-            <div className="relative shadow-2xl transition-transform duration-200 ease-out origin-center" style={{ width: '1200px', height: '800px', transform: `scale(${scale})`, backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none', backgroundSize: 'cover', backgroundColor: '#1a1a1a', flexShrink: 0 }}>
-                {visibleObjects.map(obj => (
-                    <div key={obj.id} onClick={() => handleObjectClick(obj)} className={`absolute active:opacity-70 ${obj.hidden ? 'opacity-40 grayscale' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', ...getShapeStyleLib(obj.shape) }}>
-                         {obj.type !== 'DECORATION' && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md bg-black/30">{obj.label}</span>}
-                         {obj.hidden && <div className="absolute top-0 right-0 bg-black/80 px-1 rounded text-[7px] text-orange-400 border border-orange-400/50">H</div>}
-                    </div>
-                ))}
-                {visibleCharacters.map(char => (
-                    <div key={char.id} className="absolute flex flex-col items-center justify-center pointer-events-none" style={{ left: char.x, top: char.y, width: CHAR_SIZE, height: CHAR_SIZE, zIndex: 50 }}>
-                         <div className="absolute -top-5 bg-black/50 text-white text-[9px] px-1 rounded whitespace-nowrap">{char.name}</div>
-                         <div className={`w-full h-full rounded-lg overflow-hidden bg-[#222] ${char.id === activeCharId ? 'ring-4 ring-yellow-400' : ''}`}>{char.avatar ? <img src={char.avatar} className="w-full h-full object-cover" /> : <User size={24} className="m-auto mt-2"/>}</div>
-                    </div>
-                ))}
+            <div className="relative shadow-2xl transition-transform duration-200 ease-out origin-center" style={{ width: `${mapW}px`, height: `${mapH}px`, transform: `scale(${scale})`, backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none', backgroundSize: 'cover', backgroundColor: '#1a1a1a', flexShrink: 0 }}>
+                {renderList.map((item, idx) => {
+                  if (item.type === 'OBJ') {
+                    const obj = item.data;
+                    if (obj.type === 'SPAWN_POINT') {
+                       if (isAdmin) {
+                           return (
+                               <div key={obj.id} className="absolute opacity-50 pointer-events-none" style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, zIndex: obj.zIndex ?? 5 }}>
+                                   <div className="w-full h-full border-2 border-dashed border-violet-500 rounded-full flex items-center justify-center bg-violet-500/20">
+                                       <span className="text-[8px] text-violet-300 font-bold">START</span>
+                                   </div>
+                               </div>
+                           );
+                       }
+                       return null;
+                    }
+                    return (
+                      <div key={obj.id} onClick={() => handleObjectClick(obj)} className={`absolute active:opacity-70 ${obj.hidden ? 'opacity-40 grayscale' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', zIndex: obj.zIndex ?? 10, ...getShapeStyleLib(obj.shape) }}>
+                           {obj.type !== 'DECORATION' && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md bg-black/30">{obj.label}</span>}
+                           {obj.hidden && <div className="absolute top-0 right-0 bg-black/80 px-1 rounded text-[7px] text-orange-400 border border-orange-400/50">H</div>}
+                      </div>
+                    );
+                  } else {
+                    const char = item.data;
+                    return (
+                      <div key={char.id} className="absolute flex flex-col items-center justify-center pointer-events-none" style={{ left: char.x, top: char.y, width: CHAR_SIZE, height: CHAR_SIZE, zIndex: 50 }}>
+                           <div className="absolute -top-5 bg-black/50 text-white text-[9px] px-1 rounded whitespace-nowrap">{char.name}</div>
+                           <div className={`w-full h-full rounded-lg overflow-hidden bg-[#222] ${char.id === activeCharId ? 'ring-4 ring-yellow-400' : ''}`}>{char.avatar ? <img src={char.avatar} className="w-full h-full object-cover" /> : <User size={24} className="m-auto mt-2"/>}</div>
+                      </div>
+                    );
+                  }
+                })}
             </div>
          ) : <div className="p-10 text-center">데이터 없음</div>}
       </div>

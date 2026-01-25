@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { GameData, MapScene, MapObject, ObjectType } from '../../types';
 import { DEFAULT_PROBABILITY } from '../../lib/constants';
@@ -36,20 +37,39 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
 
   const handleAddMap = () => {
     const newId = `map_${generateId()}`;
-    const newMap = { id: newId, name: `New Map ${data.maps.length + 1}`, objects: [] };
+    const newMap = { id: newId, name: `New Map ${data.maps.length + 1}`, width: 1200, height: 800, objects: [] };
     setData(prev => ({ ...prev, maps: [...prev.maps, newMap] }));
     setCurrentMapId(newId);
   };
 
   const handleAddObject = (type: ObjectType) => {
     if (!currentMap) return;
+    
+    let label = '장식';
+    let color = 'rgba(100, 116, 139, 0.8)';
+    let width = 80;
+    let height = 80;
+    
+    if (type === 'OBJECT') {
+        label = '조사';
+        color = 'rgba(16, 185, 129, 0.8)';
+    } else if (type === 'MAP_LINK') {
+        label = '이동';
+        color = 'rgba(59, 130, 246, 0.8)';
+    } else if (type === 'SPAWN_POINT') {
+        label = '시작';
+        color = 'rgba(139, 92, 246, 0.8)'; // Violet
+        width = 64;
+        height = 64;
+    }
+
     const newObj: MapObject = {
       id: generateId(),
       type,
-      label: type === 'MAP_LINK' ? '이동' : '조사',
-      x: 100, y: 100, width: 80, height: 80,
-      color: type === 'OBJECT' ? 'rgba(16, 185, 129, 0.8)' : 'rgba(100, 116, 139, 0.8)',
-      shape: 'RECTANGLE',
+      label,
+      x: 100, y: 100, width, height,
+      color,
+      shape: type === 'SPAWN_POINT' ? 'CIRCLE' : 'RECTANGLE',
       useProbability: type === 'OBJECT',
       data: type === 'OBJECT' ? JSON.parse(JSON.stringify(DEFAULT_PROBABILITY)) : undefined
     };
@@ -117,7 +137,8 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
                 <div className="h-full relative overflow-auto touch-none bg-[#1a1a1a]" onTouchMove={handleTouchMove} onTouchEnd={() => setIsDragging(false)}>
                     {currentMap && (
                         <div className="relative shadow-xl" style={{ 
-                            width: '1200px', height: '800px', 
+                            width: `${currentMap.width || 1200}px`, 
+                            height: `${currentMap.height || 800}px`, 
                             backgroundImage: currentMap.bgImage ? `url(${currentMap.bgImage})` : 'none',
                             backgroundSize: 'cover'
                         }}>
@@ -148,6 +169,9 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
                         </button>
                         <button onClick={() => handleAddObject('DECORATION')} className="bg-gray-600 p-3 rounded-full shadow-lg text-white font-bold text-xs">
                            + 장식
+                        </button>
+                        <button onClick={() => handleAddObject('SPAWN_POINT')} className="bg-violet-600 p-3 rounded-full shadow-lg text-white font-bold text-xs">
+                           + 시작
                         </button>
                     </div>
                 </div>
