@@ -1,9 +1,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameData, MapScene, MapObject, ShapeType, ResultType, StatMethod } from '../../types';
-import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag, Copy, ClipboardPaste, CheckCircle2 } from 'lucide-react';
-import { blobToBase64 } from '../../lib/utils';
+import { GameData, MapScene, MapObject, ShapeType, ResultType, StatMethod, MapObjectAction, ProbabilityProfile } from '../../types';
+import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag, Copy, ClipboardPaste, CheckCircle2, ListPlus, Plus, Edit3 } from 'lucide-react';
+import { blobToBase64, generateId } from '../../lib/utils';
+import { DEFAULT_PROBABILITY } from '../../lib/constants';
 import { ImageCropperModal, CropShape } from '../common/ImageCropperModal';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
 
 interface ObjectInspectorProps {
   mapList: MapScene[];
@@ -12,7 +15,6 @@ interface ObjectInspectorProps {
   onUpdateMap: (updates: Partial<MapScene>) => void;
   onUpdateObject: (id: string, updates: Partial<MapObject>) => void;
   onDeleteObject: (id: string) => void;
-  // New props for copy/paste
   onCopy?: () => void;
   onPaste?: () => void;
   canPaste?: boolean;
@@ -26,6 +28,175 @@ const METHOD_DESCRIPTIONS: Record<StatMethod, string> = {
   DIFFICULTY: "고정된 난이도에서 내 스탯을 뺀 값보다 주사위 눈금이 낮으면 성공합니다. (1D100 ≤ 난이도-스탯)",
   THRESHOLD: "캐릭터의 스탯 수치 자체가 성공의 기준선이 됩니다. 스탯보다 낮게 나와야 성공하는 정통 TRPG 방식입니다. (1D100 ≤ 스탯)"
 };
+
+// --- Sub Action Editor Modal Component ---
+interface SubActionEditorProps {
+    isOpen: boolean;
+    onClose: () => void;
+    action: MapObjectAction;
+    onSave: (action: MapObjectAction) => void;
+    mapList: MapScene[];
+    otherObjects: MapObject[];
+    gameData?: GameData;
+}
+
+const SubActionEditorModal: React.FC<SubActionEditorProps> = ({ isOpen, onClose, action: initialAction, onSave, mapList, otherObjects, gameData }) => {
+    const [action, setAction] = useState<MapObjectAction>(initialAction);
+
+    useEffect(() => {
+        setAction(initialAction);
+    }, [initialAction, isOpen]);
+
+    const updateAction = (updates: Partial<MapObjectAction>) => {
+        setAction(prev => ({ ...prev, ...updates }));
+    };
+
+    const updateOutcome = (resultType: ResultType, updates: any) => {
+        if (!action.data) return;
+        setAction(prev => ({
+            ...prev,
+            data: {
+                ...prev.data!,
+                outcomes: {
+                    ...prev.data!.outcomes,
+                    [resultType]: { ...prev.data!.outcomes[resultType], ...updates }
+                }
+            }
+        }));
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="추가 행동 상세 설정" maxWidth="max-w-xl" footer={<div className="flex gap-2"><Button variant="ghost" onClick={onClose}>취소</Button><Button variant="primary" onClick={() => { onSave(action); onClose(); }}>저장</Button></div>}>
+            <div className="space-y-4">
+                <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1">행동 이름 (버튼 라벨)</label>
+                    <input type="text" value={action.label} onChange={(e) => updateAction({ label: e.target.value })} className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-white" />
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-2">행동 유형</label>
+                    <div className="flex gap-2 bg-[#1e1e1e] p-1 rounded border border-[#444]">
+                        <button 
+                            onClick={() => updateAction({ actionType: 'BASIC' })} 
+                            className={`flex-1 py-2 rounded text-xs font-bold ${action.actionType === 'BASIC' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:bg-[#333]'}`}
+                        >
+                            <FileText size={14} className="inline mr-1"/> 일반/이동
+                        </button>
+                        <button 
+                            onClick={() => updateAction({ actionType: 'PROBABILITY', data: action.data || JSON.parse(JSON.stringify(DEFAULT_PROBABILITY)) })} 
+                            className={`flex-1 py-2 rounded text-xs font-bold ${action.actionType === 'PROBABILITY' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-[#333]'}`}
+                        >
+                            <Dices size={14} className="inline mr-1"/> 판정 (확률)
+                        </button>
+                    </div>
+                </div>
+
+                {action.actionType === 'BASIC' && (
+                    <div className="space-y-3 bg-[#252525] p-3 rounded border border-[#444] animate-fade-in">
+                        <div>
+                            <label className="block text-xs text-gray-400 mb-1">결과 텍스트 (설명)</label>
+                            <textarea 
+                                rows={3} 
+                                value={action.text || ''} 
+                                onChange={(e) => updateAction({ text: e.target.value })} 
+                                className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-sm text-gray-200"
+                                placeholder="행동 시 출력될 내용을 입력하세요."
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-gray-400 mb-1">이동할 맵</label>
+                            <select value={action.targetMapId || ''} onChange={(e) => updateAction({ targetMapId: e.target.value || undefined })} className="w-full bg-[#333] border border-[#555] rounded p-1 text-xs text-gray-200">
+                                <option value="">(이동 없음)</option>
+                                {mapList.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1"><Eye size={10} className="text-emerald-500"/> 공개할 대상</label>
+                                <select value={action.revealObjectId || ''} onChange={(e) => updateAction({ revealObjectId: e.target.value || undefined })} className="w-full bg-[#333] border border-[#555] rounded p-1 text-[10px] text-gray-200">
+                                    <option value="">(없음)</option>
+                                    {otherObjects.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1 flex items-center gap-1"><EyeOff size={10} className="text-red-500"/> 숨길 대상</label>
+                                <select value={action.hideObjectId || ''} onChange={(e) => updateAction({ hideObjectId: e.target.value || undefined })} className="w-full bg-[#333] border border-[#555] rounded p-1 text-[10px] text-gray-200">
+                                    <option value="">(없음)</option>
+                                    {otherObjects.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {action.actionType === 'PROBABILITY' && action.data && (
+                    <div className="space-y-4">
+                        <div className="bg-indigo-900/10 p-3 rounded border border-indigo-500/30 space-y-3">
+                            <div>
+                                <label className="block text-[10px] text-gray-500 mb-1">판정 종류</label>
+                                <select value={action.statMethod || 'SIMPLE'} onChange={(e) => updateAction({ statMethod: e.target.value as StatMethod })} className="w-full bg-[#2a2a2a] border border-[#444] rounded p-1 text-xs text-white">
+                                    <option value="SIMPLE">단순 판정 (운)</option>
+                                    <option value="ADDITIVE">방식 A: 확률 가산</option>
+                                    <option value="VARIABLE_DICE">방식 B: 가변 주사위</option>
+                                    <option value="DIFFICULTY">방식 C: 난이도 대항</option>
+                                    <option value="THRESHOLD">방식 D: 기준치 (전통)</option>
+                                </select>
+                            </div>
+                            {action.statMethod !== 'SIMPLE' && (
+                                <div>
+                                    <label className="block text-[10px] text-gray-500 mb-1">대상 스탯</label>
+                                    <select value={action.targetStatId || ''} onChange={(e) => updateAction({ targetStatId: e.target.value })} className="w-full bg-[#2a2a2a] border border-[#444] rounded p-1 text-xs text-white">
+                                        <option value="">(스탯 선택)</option>
+                                        {gameData?.customStats?.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                                    </select>
+                                </div>
+                            )}
+                            {action.statMethod === 'VARIABLE_DICE' && (
+                                <div>
+                                    <label className="block text-[10px] text-gray-500 mb-1">성공 목표값 (Dice ≥ X)</label>
+                                    <input type="number" value={action.successTargetValue || 0} onChange={(e) => updateAction({ successTargetValue: parseInt(e.target.value) || 0 })} className="w-full bg-[#2a2a2a] border border-[#444] rounded p-1 text-xs text-white" />
+                                </div>
+                            )}
+                            {action.statMethod === 'DIFFICULTY' && (
+                                <div>
+                                    <label className="block text-[10px] text-gray-500 mb-1">고정 난이도 (1D100 ≤ X-Stat)</label>
+                                    <input type="number" value={action.difficultyValue || 0} onChange={(e) => updateAction({ difficultyValue: parseInt(e.target.value) || 0 })} className="w-full bg-[#2a2a2a] border border-[#444] rounded p-1 text-xs text-white" />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="space-y-2">
+                            {['CRITICAL_SUCCESS', 'SUCCESS', 'FAILURE', 'CRITICAL_FAILURE'].map((rt) => {
+                                const type = rt as ResultType;
+                                const outcome = action.data!.outcomes[type];
+                                const labelMap: Record<string, string> = { 'CRITICAL_SUCCESS': '대성공', 'SUCCESS': '성공', 'FAILURE': '실패', 'CRITICAL_FAILURE': '대실패' };
+                                const colorMap: Record<string, string> = { 'CRITICAL_SUCCESS': 'text-yellow-500', 'SUCCESS': 'text-green-500', 'FAILURE': 'text-gray-400', 'CRITICAL_FAILURE': 'text-red-500' };
+                                
+                                return (
+                                    <div key={type} className="p-2 bg-[#1e1e1e] rounded border border-[#444]">
+                                        <p className={`text-xs font-bold mb-1 ${colorMap[type]}`}>{labelMap[type]}</p>
+                                        <textarea rows={2} value={outcome.text} onChange={(e) => updateOutcome(type, { text: e.target.value })} className="w-full bg-[#383838] border border-[#555] rounded p-1 text-xs mb-1 text-gray-200" placeholder="결과 텍스트" />
+                                        <div className="flex gap-2 mb-1">
+                                            <input type="number" placeholder="HP" className="w-1/3 bg-[#383838] text-xs p-1 rounded border border-[#555] text-gray-200" value={outcome.hpChange} onChange={(e) => updateOutcome(type, { hpChange: parseInt(e.target.value) || 0 })} />
+                                            <input type="text" placeholder="아이템/상태" className="w-2/3 bg-[#383838] text-xs p-1 rounded border border-[#555] text-gray-200" value={outcome.itemDrop || ''} onChange={(e) => updateOutcome(type, { itemDrop: e.target.value })} />
+                                        </div>
+                                        <div className="space-y-1 mt-1">
+                                            <div className="flex items-center gap-2"><MapPin size={12} className="text-gray-500" /><select value={outcome.targetMapId || ''} onChange={(e) => updateOutcome(type, { targetMapId: e.target.value || undefined })} className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-gray-200"><option value="">(이동 없음)</option>{mapList.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select></div>
+                                            <div className="flex items-center gap-2"><Eye size={12} className="text-emerald-500" /><select value={outcome.revealObjectId || ''} onChange={(e) => updateOutcome(type, { revealObjectId: e.target.value || undefined })} className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-emerald-100"><option value="">(공개 대상)</option>{otherObjects.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}</select></div>
+                                            <div className="flex items-center gap-2"><EyeOff size={12} className="text-red-500" /><select value={outcome.hideObjectId || ''} onChange={(e) => updateOutcome(type, { hideObjectId: e.target.value || undefined })} className="flex-1 bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-red-100"><option value="">(숨김 대상)</option>{otherObjects.map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}</select></div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+        </Modal>
+    );
+};
+
+// --- Main Inspector ---
 
 const OutcomeEditor = ({ label, resultType, color, selectedObject, onUpdateObject, mapList, currentMap }: any) => {
   if (!selectedObject.data) return null;
@@ -55,6 +226,9 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
   const objectImageInputRef = useRef<HTMLInputElement>(null);
   const [tempColor, setTempColor] = useState("#000000");
   const [tempOpacity, setTempOpacity] = useState(100);
+
+  // Sub Action Edit State
+  const [editingSubActionId, setEditingSubActionId] = useState<string | null>(null);
 
   const [cropState, setCropState] = useState<{
     isOpen: boolean;
@@ -127,6 +301,32 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
     }
   };
 
+  const handleAddSubAction = () => {
+      if (!selectedObject) return;
+      const newAction: MapObjectAction = {
+          id: generateId(),
+          label: '새 행동',
+          actionType: 'BASIC',
+          text: '행동 결과 텍스트'
+      };
+      onUpdateObject(selectedObject.id, { 
+          subActions: [...(selectedObject.subActions || []), newAction] 
+      });
+      setEditingSubActionId(newAction.id);
+  };
+
+  const handleUpdateSubAction = (updatedAction: MapObjectAction) => {
+      if (!selectedObject) return;
+      const newActions = (selectedObject.subActions || []).map(a => a.id === updatedAction.id ? updatedAction : a);
+      onUpdateObject(selectedObject.id, { subActions: newActions });
+  };
+
+  const handleDeleteSubAction = (actionId: string) => {
+      if (!selectedObject) return;
+      const newActions = (selectedObject.subActions || []).filter(a => a.id !== actionId);
+      onUpdateObject(selectedObject.id, { subActions: newActions });
+  };
+
   const handleBringToFront = () => {
     if (!selectedObject || !currentMap) return;
     const maxZ = Math.max(...currentMap.objects.map(o => o.zIndex || 0), 0);
@@ -141,6 +341,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
 
   const isSpawnPoint = selectedObject?.type === 'SPAWN_POINT';
   const otherObjects = currentMap?.objects.filter(o => o.id !== selectedObject?.id) || [];
+  const activeSubAction = selectedObject?.subActions?.find(a => a.id === editingSubActionId);
 
   return (
     <>
@@ -347,7 +548,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
             {(selectedObject.type === 'OBJECT' || selectedObject.type === 'MAP_LINK') && (
               <div className="space-y-4 pt-2 border-t border-[#444]">
                 <div>
-                    <label className="block text-xs font-bold text-gray-300 mb-2">상호작용 방식</label>
+                    <label className="block text-xs font-bold text-gray-300 mb-2">상호작용 방식 (기본)</label>
                     <div className="flex bg-[#1e1e1e] rounded p-1 gap-1 border border-[#444] mb-2">
                       <button className={`flex-1 text-[10px] py-1.5 rounded transition-colors ${selectedObject.useProbability ? 'bg-indigo-600 text-white font-bold' : 'text-gray-400'}`} onClick={() => onUpdateObject(selectedObject.id, { useProbability: true })}>판정 (Stat/Dice)</button>
                       <button className={`flex-1 text-[10px] py-1.5 rounded transition-colors ${!selectedObject.useProbability ? 'bg-indigo-600 text-white font-bold' : 'text-gray-400'}`} onClick={() => onUpdateObject(selectedObject.id, { useProbability: false })}>일반/이동</button>
@@ -470,7 +671,7 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                              <p className="text-[8px] text-gray-500 text-center mt-1">위의 주사위 판정 결과가 아래 4단계 중 어디에 속하느냐에 따라 보상이 결정됩니다.</p>
                         </div>
                         
-                        <div className="mt-2 space-y-2 pb-10">
+                        <div className="mt-2 space-y-2 pb-2">
                             <OutcomeEditor label="대성공 시" resultType="CRITICAL_SUCCESS" color="text-yellow-500" selectedObject={selectedObject} onUpdateObject={onUpdateObject} mapList={mapList} currentMap={currentMap} />
                             <OutcomeEditor label="성공 시" resultType="SUCCESS" color="text-green-500" selectedObject={selectedObject} onUpdateObject={onUpdateObject} mapList={mapList} currentMap={currentMap} />
                             <OutcomeEditor label="실패 시" resultType="FAILURE" color="text-gray-400" selectedObject={selectedObject} onUpdateObject={onUpdateObject} mapList={mapList} currentMap={currentMap} />
@@ -478,6 +679,47 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                         </div>
                     </div>
                 )}
+
+                {/* Sub Actions Section (Expanded) */}
+                <div className="space-y-2 border-t border-[#444] pt-4">
+                    <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold text-gray-300 flex items-center gap-1"><ListPlus size={12}/> 추가 행동 (Custom Actions)</label>
+                        <button onClick={handleAddSubAction} className="text-xs bg-[#383838] hover:bg-[#4a4a4a] text-emerald-400 border border-[#555] px-2 py-1 rounded flex items-center gap-1">
+                            <Plus size={10} /> 추가
+                        </button>
+                    </div>
+                    {(!selectedObject.subActions || selectedObject.subActions.length === 0) && (
+                        <p className="text-[10px] text-gray-600 italic">추가 행동이 없습니다.</p>
+                    )}
+                    <div className="space-y-2">
+                        {selectedObject.subActions?.map((action, idx) => (
+                            <div key={action.id} className="bg-[#1e1e1e] p-2 rounded border border-[#444] flex flex-col gap-1">
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${action.actionType === 'PROBABILITY' ? 'bg-indigo-900 text-indigo-200' : 'bg-emerald-900 text-emerald-200'}`}>
+                                            {action.actionType === 'PROBABILITY' ? '판정' : '일반'}
+                                        </span>
+                                        <span className="text-xs font-bold text-white">{action.label}</span>
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <button onClick={() => setEditingSubActionId(action.id)} className="text-gray-400 hover:text-white p-1" title="편집">
+                                            <Edit3 size={12} />
+                                        </button>
+                                        <button onClick={() => handleDeleteSubAction(action.id)} className="text-gray-500 hover:text-red-400 p-1" title="삭제">
+                                            <Trash2 size={12} />
+                                        </button>
+                                    </div>
+                                </div>
+                                <p className="text-[10px] text-gray-500 truncate">
+                                    {action.actionType === 'PROBABILITY' 
+                                        ? `대상: ${action.targetStatId ? (gameData?.customStats?.find(s=>s.id===action.targetStatId)?.label || '알수없음') : '단순 운'}` 
+                                        : `${action.text || '(설명 없음)'}`}
+                                </p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
               </div>
             )}
           </div>
@@ -485,7 +727,20 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
           <div className="text-gray-500 text-sm text-center italic mt-10">오브젝트를 선택하여 속성을 편집하세요.</div>
         )}
       </div>
+      
       <ImageCropperModal isOpen={cropState.isOpen} file={cropState.file} initialAspectRatio={cropState.initialAspectRatio} initialShape={cropState.initialShape} onConfirm={cropState.onConfirm} onClose={() => setCropState(p => ({ ...p, isOpen: false, file: null }))} />
+      
+      {activeSubAction && (
+          <SubActionEditorModal 
+              isOpen={!!editingSubActionId}
+              onClose={() => setEditingSubActionId(null)}
+              action={activeSubAction}
+              onSave={handleUpdateSubAction}
+              mapList={mapList}
+              otherObjects={otherObjects}
+              gameData={gameData}
+          />
+      )}
     </>
   );
 };

@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { GameData, MapObject, Character, ResultType, OutcomeDef, ChatMessage } from '../../types';
-import { rollStatChallenge, getResultColor, getResultLabel } from '../../lib/game-logic';
+import { rollStatChallenge, getResultColor, getResultLabel, RollDetails } from '../../lib/game-logic';
 import { getShapeStyle as getShapeStyleLib } from '../../lib/styles';
 import { generateId } from '../../lib/utils';
 import { PlayerHUD } from './PlayerHUD';
 import { PlayerSidebar } from './PlayerSidebar';
 import { InteractionModal } from './InteractionModal';
+import { ActionSelectionModal } from './ActionSelectionModal';
 import { CharacterSetupModal } from './CharacterSetupModal';
 import { Wifi, Copy, Check, User, Megaphone, EyeOff } from 'lucide-react';
 import { usePlayerMovement } from '../../hooks/usePlayerMovement';
@@ -38,6 +39,10 @@ export const Player: React.FC<PlayerProps> = ({
   const [interactionResult, setInteractionResult] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [announcement, setAnnouncement] = useState<{title: string, message: string} | null>(null);
+  
+  // New: Selection Modal State
+  const [selectionObject, setSelectionObject] = useState<MapObject | null>(null);
+
   const remoteTargets = useRef<Record<string, { x: number, y: number, mapId: string }>>({});
   const stateRef = useRef({ characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId });
   useEffect(() => { stateRef.current = { characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId }; }, [characters, currentMapId, interactionResult, chatMessages, gameData, activeCharId]);
@@ -59,10 +64,10 @@ export const Player: React.FC<PlayerProps> = ({
       activeCharId, 
       currentMapId, 
       networkMode, 
-      isModalOpen: !!interactionResult || isCharSetupOpen, 
+      isModalOpen: !!interactionResult || isCharSetupOpen || !!selectionObject, 
       objects: currentMap?.objects || [], 
-      mapWidth: currentMap?.width, // Pass custom dimensions
-      mapHeight: currentMap?.height, // Pass custom dimensions
+      mapWidth: currentMap?.width, 
+      mapHeight: currentMap?.height, 
       setCharacters, 
       onSendMoveAction: (charId, x, y, mapId) => { 
           if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_MOVE_CHAR', charId, x, y, mapId }); 
@@ -74,11 +79,7 @@ export const Player: React.FC<PlayerProps> = ({
       const map = stateRef.current.gameData.maps.find(m => m.id === mapId);
       if (!map) return { x: 100, y: 400 };
       const spawn = map.objects.find(o => o.type === 'SPAWN_POINT');
-      if (spawn) {
-          // Center the character on the spawn point (approximately)
-          // Spawn point default size 64x64, Char size 64x64. Directly use coords.
-          return { x: spawn.x, y: spawn.y };
-      }
+      if (spawn) return { x: spawn.x, y: spawn.y };
       return { x: 100, y: 400 };
   };
 
@@ -90,10 +91,19 @@ export const Player: React.FC<PlayerProps> = ({
             switch (data.type) {
                 case 'REQUEST_ACTION':
                     if (data.action === 'CLICK_OBJECT') {
+                        // Standard Roll/Move/Basic Request
                         const obj = currentMap?.objects.find((o: any) => o.id === data.objectId);
-                        if (obj && (!obj.hidden || isAdmin)) handleObjectClickLogic(obj);
-                    } else if (data.action === 'MOVE_MAP') handleMoveLogic(data.targetMapId);
-                    else if (data.action === 'CLOSE_MODAL') setInteractionResult(null);
+                        if (obj && (!obj.hidden || isAdmin)) handleInteractionLogic(obj, 'INSPECT');
+                    } else if (data.action === 'MOVE_MAP') {
+                        handleMoveLogic(data.targetMapId);
+                    } else if (data.action === 'CLOSE_MODAL') {
+                        setInteractionResult(null);
+                    }
+                    break;
+                case 'REQUEST_SUB_ACTION':
+                    // Custom Sub-Action Request
+                    const obj = currentMap?.objects.find((o: any) => o.id === data.objectId);
+                    if (obj) handleInteractionLogic(obj, 'CUSTOM', data.subActionId);
                     break;
                 case 'REQUEST_TOGGLE_OBJECT_VISIBILITY': handleToggleVisibilityLogic(data.mapId, data.objectId, data.hidden); break;
                 case 'REQUEST_CHAR_UPDATE': setCharacters(prev => { const newChars = prev.map(c => c.id === data.charId ? { ...c, ...data.updates } : c); broadcast({ type: 'SYNC_STATE', payload: { ...currentState, characters: newChars } }); return newChars; }); break;
@@ -147,23 +157,153 @@ export const Player: React.FC<PlayerProps> = ({
       } 
   };
 
-  const handleObjectClick = (obj: MapObject) => { if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id }); else handleObjectClickLogic(obj); };
+  // 1. Initial Click Handler (Determines if menu is needed)
+  const handleObjectClick = (obj: MapObject) => { 
+      if (obj.type === 'SPAWN_POINT') return;
+      if (obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id)) { return; }
 
-  const handleObjectClickLogic = (obj: MapObject) => {
-    if (obj.type === 'SPAWN_POINT') return; // Ignore clicks on spawn points
+      // Check for available actions
+      const hasInspect = obj.useProbability;
+      const hasDescription = !!obj.description && obj.description.trim() !== "";
+      const hasSubActions = obj.subActions && obj.subActions.length > 0;
+      const hasMove = !!obj.targetMapId && !hasInspect; // Pure move object
+
+      // Count options
+      let optionCount = 0;
+      if (hasInspect) optionCount++;
+      if (hasDescription) optionCount++;
+      if (hasSubActions) optionCount += obj.subActions!.length;
+      if (hasMove) optionCount++;
+
+      // If multiple options, show menu locally (no network yet)
+      if (optionCount > 1 || hasSubActions) {
+          setSelectionObject(obj);
+      } else {
+          // If only one option, execute immediately
+          // Default to INSPECT if available, else BASIC/MOVE
+          if (hasInspect) executeInteraction(obj, 'INSPECT');
+          else if (hasDescription) executeInteraction(obj, 'BASIC');
+          else if (hasMove) executeInteraction(obj, 'MOVE');
+          else executeInteraction(obj, 'BASIC'); // Fallback
+      }
+  };
+
+  // 2. Execute Specific Interaction (Sends Network Request)
+  const executeInteraction = (obj: MapObject, type: 'INSPECT' | 'BASIC' | 'MOVE' | 'CUSTOM', subActionId?: string) => {
+      setSelectionObject(null); // Close menu if open
+
+      if (type === 'MOVE') {
+          if (obj.targetMapId) handleMoveLogic(obj.targetMapId);
+          return;
+      }
+
+      if (networkMode === 'CLIENT') {
+          if (type === 'CUSTOM' && subActionId) {
+              sendToHost({ type: 'REQUEST_SUB_ACTION', objectId: obj.id, subActionId });
+          } else {
+              if (type === 'INSPECT' || (type === 'BASIC' && !obj.useProbability)) {
+                  sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
+              } else if (type === 'BASIC') {
+                  setInteractionResult({ objectName: obj.label, description: obj.description, hasRoll: false });
+              }
+          }
+      } else {
+          // HOST
+          handleInteractionLogic(obj, type, subActionId);
+      }
+  };
+
+  // 3. Logic Processor (Host Side)
+  const handleInteractionLogic = (obj: MapObject, type: 'INSPECT' | 'BASIC' | 'MOVE' | 'CUSTOM', subActionId?: string) => {
     
-    // Single Use Check
-    if (obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id)) {
-        // Already used
-        // alert("이미 조사한 대상입니다."); // Optional: Alert or just ignore
-        return; 
+    const applyVisibilityTriggers = (revealId?: string, hideId?: string) => { if (revealId) handleToggleVisibility(currentMapId, revealId, false); if (hideId) handleToggleVisibility(currentMapId, hideId, true); };
+
+    // Move Logic
+    if (type === 'MOVE') {
+        if (obj.targetMapId) handleMoveLogic(obj.targetMapId);
+        return;
     }
 
-    if ((obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId)) && (!obj.description || obj.description.trim() === '')) {
-      if (obj.targetMapId) { handleMoveLogic(obj.targetMapId); return; }
+    // Custom Sub Action Logic
+    if (type === 'CUSTOM' && subActionId) {
+        const subAction = obj.subActions?.find(a => a.id === subActionId);
+        if (subAction) {
+            // Check for PROBABILITY or BASIC sub-action
+            if (subAction.actionType === 'PROBABILITY' && subAction.data) {
+                // Perform Roll Logic for Sub Action
+                if (!activeChar) { alert("탐사자를 먼저 생성해주세요."); return; }
+                
+                // Create a temporary object-like structure for the rolling function
+                const tempObj = { 
+                    ...obj, // Base properties
+                    useProbability: true,
+                    statMethod: subAction.statMethod,
+                    targetStatId: subAction.targetStatId,
+                    difficultyValue: subAction.difficultyValue,
+                    successTargetValue: subAction.successTargetValue,
+                    data: subAction.data
+                };
+
+                const { result: resultType, details } = rollStatChallenge(tempObj, activeChar, gameData.customStats || []);
+                const outcome = subAction.data.outcomes[resultType];
+                
+                // Apply Effects
+                applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
+                
+                setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
+                    ...c, 
+                    hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
+                    inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory
+                } : c));
+
+                const resultData: any = { 
+                    objectName: subAction.label, // Use sub-action label 
+                    description: `[${subAction.label}]\n(판정 결과)`, 
+                    hasRoll: true, 
+                    type: resultType, 
+                    outcome, 
+                    rollDetails: details,
+                    targetMapId: outcome.targetMapId
+                };
+                
+                if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
+                setInteractionResult(resultData);
+
+            } else {
+                // Basic Action
+                applyVisibilityTriggers(subAction.revealObjectId, subAction.hideObjectId);
+                
+                const resultData: any = { 
+                    objectName: obj.label, 
+                    description: `[${subAction.label}]\n${subAction.text || ''}`, 
+                    hasRoll: false,
+                    targetMapId: subAction.targetMapId
+                };
+                
+                if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
+                setInteractionResult(resultData);
+            }
+        }
+        return;
     }
-    let resultData: any = { objectName: obj.label, description: obj.description, hasRoll: false };
-    const applyVisibilityTriggers = (revealId?: string, hideId?: string) => { if (revealId) handleToggleVisibility(currentMapId, revealId, false); if (hideId) handleToggleVisibility(currentMapId, hideId, true); };
+
+    // Basic Logic (Just Description)
+    if (type === 'BASIC') {
+        setInteractionResult({ objectName: obj.label, description: obj.description, hasRoll: false });
+        return;
+    }
+
+    // Inspect Logic (Roll) - Main Object
+    let resultData: {
+        objectName: string;
+        description?: string;
+        hasRoll: boolean;
+        type?: ResultType;
+        outcome?: OutcomeDef;
+        rollDetails?: RollDetails;
+        targetMapId?: string;
+        targetMapName?: string;
+    } = { objectName: obj.label, description: obj.description, hasRoll: false };
 
     if (obj.useProbability && obj.data) {
         if (!activeChar) { alert("탐사자를 먼저 생성해주세요."); return; }
@@ -171,7 +311,7 @@ export const Player: React.FC<PlayerProps> = ({
         const outcome = obj.data.outcomes[resultType];
         applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
         
-        // Update character state (HP, Inventory, History)
+        // Update character state
         setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
             ...c, 
             hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
@@ -182,10 +322,9 @@ export const Player: React.FC<PlayerProps> = ({
         resultData = { ...resultData, hasRoll: true, type: resultType, outcome, rollDetails: details };
         if (outcome.targetMapId) resultData.targetMapId = outcome.targetMapId;
     } else {
+        // Fallback for non-prob object treated as Inspect (shouldn't happen often)
         applyVisibilityTriggers(obj.revealObjectId, obj.hideObjectId);
         if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
-        
-        // Mark as used for simple objects too
         if (obj.isSingleUse) {
              setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
                 ...c, 
@@ -193,15 +332,14 @@ export const Player: React.FC<PlayerProps> = ({
             } : c));
         }
     }
+    
     if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
     setInteractionResult(resultData);
   };
 
   const handleAddCharacterLogic = (character: Character) => { 
-      // Ensure character spawns at the correct spot for their starting map
       const pos = getSpawnPosition(character.mapId || currentMapId);
       const newChar = { ...character, x: pos.x, y: pos.y };
-      
       setCharacters(prev => [...prev, newChar]); 
       if (networkMode === 'HOST') { 
           setActiveCharId(newChar.id); 
@@ -244,10 +382,9 @@ export const Player: React.FC<PlayerProps> = ({
                                   </div>
                               );
                           }
-                          return null; // Hide spawn points for players
+                          return null;
                       }
                       
-                      // Check if already used
                       const isUsed = obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id);
 
                       return (
@@ -295,7 +432,13 @@ export const Player: React.FC<PlayerProps> = ({
         </div>
       </div>
       <PlayerSidebar characters={characters} activeCharId={activeCharId} chatMessages={chatMessages} isAdmin={isAdmin} onSelectChar={setActiveCharId} onAddChar={() => setIsCharSetupOpen(true)} onUpdateChar={(id, updates) => { setCharacters(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c)); if (networkMode === 'CLIENT') sendToHost({ type: 'REQUEST_CHAR_UPDATE', charId: id, updates }); }} onDeleteChar={(id) => { if(networkMode !== 'CLIENT') { const nextChars = characters.filter(c => c.id !== id); setCharacters(nextChars); if(activeCharId === id) setActiveCharId(nextChars[0]?.id || ''); } }} onSendMessage={handleSendMessage} onAdminLogin={handleAdminLogin} onSendAnnouncement={(tid, t, m) => { if (isAdmin && networkMode === 'HOST') broadcast({ type: 'ADMIN_ANNOUNCEMENT', targetId: tid, title: t, message: m }); if (tid === null || tid === activeCharId) setAnnouncement({ title: t, message: m }); }} onSummonPlayer={handleSummonPlayer} currentMapObjects={currentMap?.objects || []} onToggleVisibility={handleToggleVisibility} currentMapId={currentMapId} customStats={gameData.customStats} />
+      
+      {/* Interaction Result Modal */}
       {interactionResult && <InteractionModal data={interactionResult} characterName={activeChar?.name || '익명'} onClose={() => networkMode === 'CLIENT' ? sendToHost({ type: 'REQUEST_ACTION', action: 'CLOSE_MODAL' }) : setInteractionResult(null)} onMove={handleMoveLogic} />}
+      
+      {/* Selection Modal */}
+      {selectionObject && <ActionSelectionModal object={selectionObject} onClose={() => setSelectionObject(null)} onSelect={(type, subId) => executeInteraction(selectionObject, type, subId)} />}
+
       {announcement && <Modal isOpen={true} title="📣 시스템 공지" onClose={() => setAnnouncement(null)} maxWidth="max-w-md" footer={<Button variant="primary" onClick={() => setAnnouncement(null)}>확인</Button>}><div className="flex flex-col items-center text-center p-2"><div className="bg-orange-900/30 p-4 rounded-full mb-4 border border-orange-500/50"><Megaphone size={40} className="text-orange-500" /></div><h3 className="text-xl font-bold text-white mb-2">{announcement.title}</h3><p className="text-gray-300 whitespace-pre-wrap">{announcement.message}</p></div></Modal>}
       <CharacterSetupModal gameData={gameData} isOpen={isCharSetupOpen} onClose={() => setIsCharSetupOpen(false)} onAdd={handleAddCharacterLogic} />
     </div>

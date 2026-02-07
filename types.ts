@@ -34,6 +34,27 @@ export interface ProbabilityProfile {
   };
 }
 
+export interface MapObjectAction {
+  id: string;
+  label: string;
+  
+  // Action Type Configuration
+  actionType: 'BASIC' | 'PROBABILITY';
+  
+  // For BASIC / Description
+  text?: string; // Used as description
+  targetMapId?: string;
+  revealObjectId?: string;
+  hideObjectId?: string;
+
+  // For PROBABILITY
+  statMethod?: StatMethod;
+  targetStatId?: string;
+  difficultyValue?: number; // Used for DIFFICULTY method
+  successTargetValue?: number; // Used for VARIABLE_DICE method
+  data?: ProbabilityProfile; // Outcomes
+}
+
 export interface MapObject {
   id: string;
   type: ObjectType;
@@ -62,6 +83,9 @@ export interface MapObject {
   hidden?: boolean; // Visibility control
   isSolid?: boolean; // Physical collision blocking player movement
   zIndex?: number; // Layer order (higher = front)
+  
+  // New: Multiple Interaction Options
+  subActions?: MapObjectAction[];
 }
 
 export interface MapScene {
@@ -131,4 +155,27 @@ export interface ChatMessage { id: string; senderName: string; text: string; tim
 export interface FactionChatMessage { id: string; senderName: string; senderId: string; senderFactionId: string; text: string; timestamp: number; channel: 'TEAM' | 'BLOCK'; targetId: string; }
 export type NetworkMode = 'SOLO' | 'HOST' | 'CLIENT';
 export interface SyncStatePayload { currentMapId: string; characters: Character[]; interactionResult: any | null; chatMessages: ChatMessage[]; }
-export type NetworkAction = | { type: 'SYNC_STATE'; payload: SyncStatePayload } | { type: 'SYNC_GAMEDATA'; payload: GameData } | { type: 'SYNC_FACTION_GAMEDATA'; payload: FactionGameData } | { type: 'WELCOME'; msg: string } | { type: 'REQUEST_ACTION'; action: 'CLICK_OBJECT'; objectId: string } | { type: 'REQUEST_ACTION'; action: 'MOVE_MAP'; targetMapId: string } | { type: 'REQUEST_ACTION'; action: 'CLOSE_MODAL' } | { type: 'REQUEST_CHAR_UPDATE'; charId: string; updates: Partial<Character> } | { type: 'REQUEST_ADD_CHAR'; character: Character } | { type: 'REQUEST_CHAT'; text: string; senderName: string } | { type: 'REQUEST_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string } | { type: 'ON_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string } | { type: 'REQUEST_TOGGLE_OBJECT_VISIBILITY'; mapId: string; objectId: string; hidden: boolean } | { type: 'JOIN_FACTION_GAME'; profile: FactionPlayerProfile } | { type: 'SYNC_PLAYERS'; players: FactionPlayerProfile[] } | { type: 'UPDATE_PLAYER_PROFILE'; profile: FactionPlayerProfile } | { type: 'CHANGE_FACTION_MAP'; mapId: string } | { type: 'SYNC_COMBAT_STATE'; state: GlobalCombatState } | { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] } | { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage } | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] } | { type: 'ADMIN_ANNOUNCEMENT'; targetId: string | null; title: string; message: string };
+export type NetworkAction = 
+| { type: 'SYNC_STATE'; payload: SyncStatePayload } 
+| { type: 'SYNC_GAMEDATA'; payload: GameData } 
+| { type: 'SYNC_FACTION_GAMEDATA'; payload: FactionGameData } 
+| { type: 'WELCOME'; msg: string } 
+| { type: 'REQUEST_ACTION'; action: 'CLICK_OBJECT'; objectId: string } 
+| { type: 'REQUEST_SUB_ACTION'; objectId: string; subActionId: string } // New Action Type
+| { type: 'REQUEST_ACTION'; action: 'MOVE_MAP'; targetMapId: string } 
+| { type: 'REQUEST_ACTION'; action: 'CLOSE_MODAL' } 
+| { type: 'REQUEST_CHAR_UPDATE'; charId: string; updates: Partial<Character> } 
+| { type: 'REQUEST_ADD_CHAR'; character: Character } 
+| { type: 'REQUEST_CHAT'; text: string; senderName: string } 
+| { type: 'REQUEST_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string } 
+| { type: 'ON_MOVE_CHAR'; charId: string; x: number; y: number; mapId: string } 
+| { type: 'REQUEST_TOGGLE_OBJECT_VISIBILITY'; mapId: string; objectId: string; hidden: boolean } 
+| { type: 'JOIN_FACTION_GAME'; profile: FactionPlayerProfile } 
+| { type: 'SYNC_PLAYERS'; players: FactionPlayerProfile[] } 
+| { type: 'UPDATE_PLAYER_PROFILE'; profile: FactionPlayerProfile } 
+| { type: 'CHANGE_FACTION_MAP'; mapId: string } 
+| { type: 'SYNC_COMBAT_STATE'; state: GlobalCombatState } 
+| { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] } 
+| { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage } 
+| { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] } 
+| { type: 'ADMIN_ANNOUNCEMENT'; targetId: string | null; title: string; message: string };

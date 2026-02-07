@@ -2,7 +2,7 @@
 import JSZip from 'jszip';
 // @ts-ignore
 import * as XLSX from 'xlsx';
-import { GameData, MapScene, MapObject, FactionGameData, CombatGameData } from '../types';
+import { GameData, MapScene, MapObject, FactionGameData, CombatGameData, OutcomeDef, ProbabilityProfile } from '../types';
 import { blobToBase64 } from './utils';
 
 export const exportGameDataToZip = async (data: GameData) => {
@@ -64,11 +64,11 @@ export const exportGameDataToZip = async (data: GameData) => {
   document.body.removeChild(link);
 };
 
-export const exportGameDataToExcel = (data: GameData) => {
+export const exportGameDataToExcel = (data: GameData, includeEnvironment: boolean = true) => {
   const wb = XLSX.utils.book_new();
   const rows: any[] = [];
-  const merges: any[] = [];
-
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+  
   // Color Palette for Maps (ARGB Hex)
   const MAP_COLORS = [
       "FFE0B2", // Orange
@@ -83,15 +83,11 @@ export const exportGameDataToExcel = (data: GameData) => {
 
   const HEADER_COLOR = "EEEEEE"; // Light Gray
 
-  // 1. Header Row
-  rows.push([
-    "구역 (Map)", 
-    "분류 (Category)", 
-    "이름 (Name)", 
-    "조건 (Condition)", 
-    "효과 (Effect)", 
-    "내용 (Description)"
-  ]);
+  // Helper: Replace \n with \r\n for Excel and ensure string
+  const formatText = (text?: string) => {
+      if (!text) return "";
+      return text.toString().replace(/\n/g, "\r\n");
+  };
 
   // Helper to find object label by ID
   const findObjLabel = (id?: string) => {
@@ -110,123 +106,195 @@ export const exportGameDataToExcel = (data: GameData) => {
       return m ? m.name : id;
   };
 
-  let rowIndex = 1; // Current row index (0-based from rows array perspective)
+  // Helper to construct effect strings
+  const getEffectsList = (targetMapId?: string, revealId?: string, hideId?: string, hpChange?: number, itemDrop?: string) => {
+      const effects: string[] = [];
+      if (hpChange && hpChange !== 0) effects.push(`HP ${hpChange > 0 ? '+' : ''}${hpChange}`);
+      if (itemDrop) effects.push(`📦 획득: ${itemDrop}`);
+      if (targetMapId) effects.push(`➡ 이동: ${findMapName(targetMapId)}`);
+      if (revealId) effects.push(`👁 공개: ${findObjLabel(revealId)}`);
+      if (hideId) effects.push(`🚫 숨김: ${findObjLabel(hideId)}`);
+      return effects.join(', ');
+  };
+
+  // Helper to format OutcomeDef into a string
+  const formatOutcome = (outcome: OutcomeDef) => {
+      const effects = getEffectsList(outcome.targetMapId, outcome.revealObjectId, outcome.hideObjectId, outcome.hpChange, outcome.itemDrop);
+      const text = outcome.text ? `"${outcome.text}"` : '';
+      // Combine text and effects
+      return [text, effects].filter(Boolean).join(' / ');
+  };
+
+  // Helper to build probability block string
+  const buildProbabilityString = (profile: ProbabilityProfile) => {
+      const outcomes = [
+          { label: '[대성공]', data: profile.outcomes.CRITICAL_SUCCESS },
+          { label: '[성공]', data: profile.outcomes.SUCCESS },
+          { label: '[실패]', data: profile.outcomes.FAILURE },
+          { label: '[대실패]', data: profile.outcomes.CRITICAL_FAILURE },
+      ];
+      
+      return outcomes.map(o => {
+          const content = formatOutcome(o.data);
+          return `${o.label} ${content}`;
+      }).join('\r\n');
+  };
+
+  // 1. Header Row
+  rows.push([
+    "구역 (Map)", 
+    "이름 (Name)", 
+    "조건 (Condition)", 
+    "효과 (Effect)", 
+    "내용 (Description)"
+  ]);
+
   const mapRowRanges: { start: number, end: number, color: string }[] = [];
 
   data.maps.forEach((map, mapIdx) => {
-    const startRow = rowIndex;
+    // Start row for coloring
+    const mapStartRow = rows.length;
 
-    // Map Title Row
-    rows.push([`📍 [${map.name}]`, "", "", "", "", ""]);
-    merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
-    rowIndex++;
+    // 1. Map Title Row
+    rows.push([
+        map.name,
+        `📍 [${map.name}] 입니다.`,
+        "-",
+        "-",
+        "-"
+    ]);
 
-    // Map Description Row (Modified: No Prefix)
+    // 2. Map Description
     if (map.description && map.description.trim() !== "") {
-        rows.push([map.description, "", "", "", "", ""]);
-        merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
-        rowIndex++;
+        rows.push([
+            map.name,
+            "(맵 서술)",
+            "-",
+            "-",
+            formatText(map.description)
+        ]);
     }
 
     // Separate Objects
     const interactables = map.objects.filter(o => o.type === 'OBJECT' || o.type === 'MAP_LINK');
     const decorations = map.objects.filter(o => o.type === 'DECORATION' || o.type === 'SPAWN_POINT');
 
-    // === SECTION 1: INTERACTABLES ===
-    if (interactables.length > 0) {
-        interactables.forEach(obj => {
-            const objStartRow = rowIndex;
-            const objTypeLabel = obj.type === 'MAP_LINK' ? '이동' : '조사';
+    // 3. Interactables
+    interactables.forEach(obj => {
+        const objStartRow = rows.length; // Start tracking for Object Name merge
 
-            // Base Info & Default Effect
-            const baseEffects: string[] = [];
-            if (obj.targetMapId) baseEffects.push(`➡ 이동: ${findMapName(obj.targetMapId)}`);
-            if (obj.revealObjectId) baseEffects.push(`👁 공개: ${findObjLabel(obj.revealObjectId)}`);
-            if (obj.hideObjectId) baseEffects.push(`🚫 숨김: ${findObjLabel(obj.hideObjectId)}`);
-            if (obj.isSingleUse) baseEffects.push(`1회성`);
+        // --- Main Object Logic ---
+        let mainEffects = "";
+        let mainDesc = formatText(obj.description);
 
-            rows.push([
-                map.name,                 
-                objTypeLabel,             
-                obj.label,                
-                "기본 (Default)",         
-                baseEffects.join("\n"),   
-                obj.description || ""     
-            ]);
-            rowIndex++;
+        if (obj.useProbability && obj.data) {
+            // If main interaction is probability based
+            mainEffects = buildProbabilityString(obj.data);
+            
+            // Add side effects that happen regardless of roll (rare but possible in data structure)
+            const sideEffects = getEffectsList(obj.targetMapId, obj.revealObjectId, obj.hideObjectId);
+            if (sideEffects) mainEffects = `(기본: ${sideEffects})\r\n` + mainEffects;
 
-            // Probability Outcomes (Sub-rows)
-            if (obj.useProbability && obj.data) {
-                const outcomes = [
-                    { label: "  ↳ 대성공", data: obj.data.outcomes.CRITICAL_SUCCESS },
-                    { label: "  ↳ 성공", data: obj.data.outcomes.SUCCESS },
-                    { label: "  ↳ 실패", data: obj.data.outcomes.FAILURE },
-                    { label: "  ↳ 대실패", data: obj.data.outcomes.CRITICAL_FAILURE },
-                ];
+        } else {
+            // Basic Interaction
+            const effects = getEffectsList(obj.targetMapId, obj.revealObjectId, obj.hideObjectId);
+            if (obj.isSingleUse) mainEffects = `(1회성) ${effects}`;
+            else mainEffects = effects;
+        }
 
-                outcomes.forEach(outcome => {
-                    const effs: string[] = [];
-                    if (outcome.data.hpChange !== 0) effs.push(`HP ${outcome.data.hpChange > 0 ? '+' : ''}${outcome.data.hpChange}`);
-                    if (outcome.data.itemDrop) effs.push(`📦 획득: ${outcome.data.itemDrop}`);
-                    if (outcome.data.targetMapId) effs.push(`➡ 이동: ${findMapName(outcome.data.targetMapId)}`);
-                    if (outcome.data.revealObjectId) effs.push(`👁 공개: ${findObjLabel(outcome.data.revealObjectId)}`);
-                    if (outcome.data.hideObjectId) effs.push(`🚫 숨김: ${findObjLabel(outcome.data.hideObjectId)}`);
+        rows.push([
+            map.name,
+            obj.label,
+            "[기본]", // Condition
+            mainEffects || "-",
+            mainDesc
+        ]);
 
-                    rows.push([
-                        map.name,
-                        objTypeLabel,
-                        obj.label,
-                        outcome.label,
-                        effs.join("\n"),
-                        outcome.data.text
-                    ]);
-                    rowIndex++;
-                });
-            }
+        // --- Sub Actions Logic ---
+        if (obj.subActions && obj.subActions.length > 0) {
+            obj.subActions.forEach(action => {
+                let subEffects = "";
+                let subDesc = formatText(action.text);
 
-            // Merge "Object Name" and "Category" cells for clarity
-            if (rowIndex - 1 > objStartRow) {
-                merges.push({ s: { r: objStartRow, c: 1 }, e: { r: rowIndex - 1, c: 1 } }); // Merge Category
-                merges.push({ s: { r: objStartRow, c: 2 }, e: { r: rowIndex - 1, c: 2 } }); // Merge Name
-            }
-        });
-    } else {
-        rows.push([map.name, "조사", "(없음)", "-", "-", "-"]);
-        rowIndex++;
-    }
+                if (action.actionType === 'PROBABILITY' && action.data) {
+                    const rollInfo = `🎲 판정: ${action.statMethod || '운'}`;
+                    const probOutcomes = buildProbabilityString(action.data);
+                    
+                    const sideEffects = getEffectsList(action.targetMapId, action.revealObjectId, action.hideObjectId);
+                    
+                    subEffects = `${rollInfo}\r\n${probOutcomes}`;
+                    if(sideEffects) subEffects += `\r\n(추가: ${sideEffects})`;
 
-    // === SECTION 2: DECORATIONS ===
-    if (decorations.length > 0) {
-        // Separator for Decorations
-        rows.push([map.name, "장식/기타", "---- 환경 요소 ----", "", "", ""]);
-        rowIndex++;
+                } else {
+                    // BASIC Action
+                    subEffects = getEffectsList(action.targetMapId, action.revealObjectId, action.hideObjectId);
+                }
+
+                rows.push([
+                    map.name,
+                    obj.label, // Same Object Name
+                    `[${action.label}]`, // Condition: Sub Action Name
+                    subEffects || "-",
+                    subDesc
+                ]);
+            });
+        }
+
+        const objEndRow = rows.length - 1; // End tracking
+
+        // Merge Cells for Object Name (Column 1) if multiple rows exist
+        if (objEndRow > objStartRow) {
+            merges.push({ s: { r: objStartRow, c: 1 }, e: { r: objEndRow, c: 1 } });
+        }
+    });
+
+    // 4. Decorations / Environment (Conditional)
+    if (includeEnvironment && decorations.length > 0) {
+        // Environment Section Header
+        rows.push([
+            map.name,
+            "🌲 [ 환경 요소 ]",
+            "",
+            "",
+            ""
+        ]);
 
         decorations.forEach(obj => {
-            const typeLabel = obj.type === 'SPAWN_POINT' ? '시작 지점' : '장식';
+            if (obj.type === 'SPAWN_POINT') return; // Skip spawn points in excel
+            
             rows.push([
-                map.name,
-                typeLabel,
+                map.name, // Explicit Map Name
                 obj.label,
                 "-",
                 "-",
-                obj.description || "(설명 없음)"
+                formatText(obj.description)
             ]);
-            rowIndex++;
         });
+    }
+
+    // Determine end row
+    let mapEndRow = rows.length - 1;
+
+    // Handle empty maps (if map has no desc and no objects, add placeholder)
+    if (mapEndRow < mapStartRow + 1) { // +1 because we added Title Row
+        rows.push([map.name, "(데이터 없음)", "-", "-", "-"]);
+        mapEndRow = rows.length - 1;
+    }
+
+    // Merge Cells for Map Name (Column 0)
+    if (mapEndRow > mapStartRow) {
+        merges.push({ s: { r: mapStartRow, c: 0 }, e: { r: mapEndRow, c: 0 } });
     }
 
     // Record range for coloring
     mapRowRanges.push({
-        start: startRow,
-        end: rowIndex - 1,
+        start: mapStartRow,
+        end: mapEndRow,
         color: MAP_COLORS[mapIdx % MAP_COLORS.length]
     });
 
-    // Empty row separator
-    if (mapIdx < data.maps.length - 1) {
-        rows.push(["", "", "", "", "", ""]);
-        rowIndex++;
-    }
+    // Spacer row
+    rows.push(["", "", "", "", ""]);
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -235,15 +303,14 @@ export const exportGameDataToExcel = (data: GameData) => {
   if (merges.length > 0) {
       ws['!merges'] = merges;
   }
-
+  
   // Set Column Widths
   const wscols = [
       { wch: 15 }, // Map Name
-      { wch: 10 }, // Category
       { wch: 20 }, // Object Name
-      { wch: 15 }, // Condition
-      { wch: 25 }, // Effect
-      { wch: 60 }, // Description Text
+      { wch: 20 }, // Condition
+      { wch: 50 }, // Effect (Wider for multi-line outcomes)
+      { wch: 50 }, // Description
   ];
   ws['!cols'] = wscols;
 
@@ -283,11 +350,23 @@ export const exportGameDataToExcel = (data: GameData) => {
                   right: { style: "thin", color: { auto: 1 } }
               };
 
-              // 3. Alignment
+              // 3. Alignment (CRITICAL for Newlines)
               ws[cellAddress].s.alignment = {
-                  vertical: "top",
+                  vertical: "top", 
                   wrapText: true
               };
+
+              // Special Alignment for Map Title Row (Starts with 📍 in Column B)
+              if (C === 1 && rows[R][1] && rows[R][1].toString().startsWith('📍')) {
+                   ws[cellAddress].s.font = { bold: true, sz: 14 };
+              }
+
+              // Environment Header Row Styling
+              if (C === 1 && rows[R][1] && rows[R][1].toString().includes("환경 요소")) {
+                   ws[cellAddress].s.font = { bold: true, sz: 11 };
+                   ws[cellAddress].s.alignment = { horizontal: "center", vertical: "center" };
+                   ws[cellAddress].s.fill = { patternType: "solid", fgColor: { rgb: "E0E0E0" } }; 
+              }
 
               // 4. Header Special Styling
               if (R === 0) {
@@ -298,8 +377,9 @@ export const exportGameDataToExcel = (data: GameData) => {
       }
   }
 
+  const suffix = includeEnvironment ? "" : "_Core";
   XLSX.utils.book_append_sheet(wb, ws, "시나리오 상세");
-  XLSX.writeFile(wb, `Scenario_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `Scenario_Export${suffix}_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
 
 export const loadGameDataFromFile = async (file: File): Promise<GameData> => {

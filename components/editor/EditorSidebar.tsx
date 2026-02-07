@@ -130,9 +130,14 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
               <input type="file" ref={fileInputRef} onChange={(e) => { const file = e.target.files?.[0]; if(file) setConfirmation({ isOpen: true, type: 'IMPORT', file }); e.target.value = ''; }} accept=".json,.zip" className="hidden" />
               <Button fullWidth onClick={() => exportGameDataToZip(data)} variant="secondary" className="text-xs px-2"><Download size={14} /> ZIP</Button>
           </div>
-          <Button fullWidth onClick={() => exportGameDataToExcel(data)} variant="ghost" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20 text-xs border border-emerald-900/50">
-              <FileSpreadsheet size={14} /> Excel 내보내기
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+              <Button fullWidth onClick={() => exportGameDataToExcel(data, false)} variant="ghost" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20 text-[10px] px-1 border border-emerald-900/50">
+                  <FileSpreadsheet size={14} /> Excel (핵심)
+              </Button>
+              <Button fullWidth onClick={() => exportGameDataToExcel(data, true)} variant="ghost" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/20 text-[10px] px-1 border border-emerald-900/50">
+                  <FileSpreadsheet size={14} /> Excel (전체)
+              </Button>
+          </div>
           <div className="flex gap-2 mt-2 pt-2 border-t border-[#444]">
             <Button fullWidth onClick={() => setIsSettingsOpen(true)} variant="secondary" className="text-xs"><Settings size={14} /> 설정</Button>
             <Button fullWidth onClick={onBack} variant="ghost" icon={ArrowLeft} className="text-xs">나가기</Button>
