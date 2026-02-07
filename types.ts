@@ -66,6 +66,7 @@ export interface MapObject {
 export interface MapScene {
   id: string;
   name: string;
+  description?: string; // Map Description (Narrative)
   width?: number;  // Custom Map Width
   height?: number; // Custom Map Height
   bgImage?: string;

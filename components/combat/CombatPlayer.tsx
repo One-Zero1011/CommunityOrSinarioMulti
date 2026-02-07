@@ -613,11 +613,12 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                             </div>
                                             <div className="space-y-1">
                                                 {Object.entries(ent.stats).map(([k, v]) => {
+                                                    const val = v as number;
                                                     const def = data.stats.find(s => s.id === k);
                                                     return (
                                                         <div key={k} className="flex justify-between text-xs text-gray-400">
                                                             <span className={k === rules.deathStatId ? 'text-red-400 font-bold' : ''}>{def?.label}</span>
-                                                            <span className={`font-mono ${k === rules.deathStatId && v <= 0 ? 'text-red-600' : 'text-white'}`}>{v}</span>
+                                                            <span className={`font-mono ${k === rules.deathStatId && val <= 0 ? 'text-red-600' : 'text-white'}`}>{val}</span>
                                                         </div>
                                                     );
                                                 })}

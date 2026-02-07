@@ -164,6 +164,17 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
         <div className="mb-6 p-3 bg-[#1e1e1e] rounded space-y-3 border border-[#444]">
           <div><label className="block text-xs uppercase text-gray-400 mb-1">맵 이름</label><input type="text" value={currentMap?.name || ''} onChange={(e) => onUpdateMap({ name: e.target.value })} className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200" /></div>
           
+          <div>
+            <label className="block text-xs uppercase text-gray-400 mb-1">맵 설명/묘사 (Description)</label>
+            <textarea 
+                rows={3}
+                value={currentMap?.description || ''} 
+                onChange={(e) => onUpdateMap({ description: e.target.value })}
+                className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-xs text-gray-200 resize-none"
+                placeholder="장소에 대한 묘사 (엑셀 출력 시 상단에 표시됩니다)"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
              <div>
                 <label className="block text-xs uppercase text-gray-400 mb-1 flex items-center gap-1"><Maximize size={10}/> 맵 가로</label>

@@ -99,6 +99,13 @@ export const exportGameDataToExcel = (data: GameData) => {
   let rowIndex = 1; // Current row index (0-based, starting after header)
 
   data.maps.forEach(map => {
+    // [New Feature] Add Map Description Row if exists
+    if (map.description && map.description.trim() !== "") {
+        rows.push([map.description]);
+        merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } }); // Merge row across 6 columns
+        rowIndex++;
+    }
+
     const mapStartRow = rowIndex;
     
     // Generate a summary string of visible objects for the last column
