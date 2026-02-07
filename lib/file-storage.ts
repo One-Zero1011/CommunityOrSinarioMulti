@@ -69,6 +69,20 @@ export const exportGameDataToExcel = (data: GameData) => {
   const rows: any[] = [];
   const merges: any[] = [];
 
+  // Color Palette for Maps (ARGB Hex)
+  const MAP_COLORS = [
+      "FFE0B2", // Orange
+      "C8E6C9", // Green
+      "BBDEFB", // Blue
+      "E1BEE7", // Purple
+      "FFECB3", // Amber
+      "B2DFDB", // Teal
+      "F8BBD0", // Pink
+      "D7CCC8", // Brown
+  ];
+
+  const HEADER_COLOR = "EEEEEE"; // Light Gray
+
   // 1. Header Row
   rows.push([
     "구역 (Map)", 
@@ -97,23 +111,19 @@ export const exportGameDataToExcel = (data: GameData) => {
   };
 
   let rowIndex = 1; // Current row index (0-based from rows array perspective)
+  const mapRowRanges: { start: number, end: number, color: string }[] = [];
 
-  data.maps.forEach(map => {
-    // === MAP HEADER SECTION ===
-    // Empty row before new map (except first one)
-    if (rowIndex > 1) {
-        rows.push(["", "", "", "", "", ""]);
-        rowIndex++;
-    }
+  data.maps.forEach((map, mapIdx) => {
+    const startRow = rowIndex;
 
     // Map Title Row
     rows.push([`📍 [${map.name}]`, "", "", "", "", ""]);
     merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
     rowIndex++;
 
-    // Map Description Row
+    // Map Description Row (Modified: No Prefix)
     if (map.description && map.description.trim() !== "") {
-        rows.push([`📄 서술: ${map.description}`, "", "", "", "", ""]);
+        rows.push([map.description, "", "", "", "", ""]);
         merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
         rowIndex++;
     }
@@ -174,7 +184,7 @@ export const exportGameDataToExcel = (data: GameData) => {
                 });
             }
 
-            // Merge "Object Name" and "Category" cells for clarity if it spans multiple rows
+            // Merge "Object Name" and "Category" cells for clarity
             if (rowIndex - 1 > objStartRow) {
                 merges.push({ s: { r: objStartRow, c: 1 }, e: { r: rowIndex - 1, c: 1 } }); // Merge Category
                 merges.push({ s: { r: objStartRow, c: 2 }, e: { r: rowIndex - 1, c: 2 } }); // Merge Name
@@ -204,6 +214,19 @@ export const exportGameDataToExcel = (data: GameData) => {
             rowIndex++;
         });
     }
+
+    // Record range for coloring
+    mapRowRanges.push({
+        start: startRow,
+        end: rowIndex - 1,
+        color: MAP_COLORS[mapIdx % MAP_COLORS.length]
+    });
+
+    // Empty row separator
+    if (mapIdx < data.maps.length - 1) {
+        rows.push(["", "", "", "", "", ""]);
+        rowIndex++;
+    }
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -223,6 +246,57 @@ export const exportGameDataToExcel = (data: GameData) => {
       { wch: 60 }, // Description Text
   ];
   ws['!cols'] = wscols;
+
+  // Apply Styles (Best Attempt for Style-Supporting Libraries)
+  if (ws['!ref']) {
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+          // Determine Row Color
+          let fgColor = "FFFFFF";
+          if (R === 0) {
+              fgColor = HEADER_COLOR;
+          } else {
+              const mapRange = mapRowRanges.find(mr => R >= mr.start && R <= mr.end);
+              if (mapRange) {
+                  fgColor = mapRange.color;
+              }
+          }
+
+          for (let C = range.s.c; C <= range.e.c; ++C) {
+              const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+              if (!ws[cellAddress]) continue;
+
+              // Initialize style object if not present
+              if (!ws[cellAddress].s) ws[cellAddress].s = {};
+
+              // 1. Fill Color
+              ws[cellAddress].s.fill = {
+                  patternType: "solid",
+                  fgColor: { rgb: fgColor }
+              };
+
+              // 2. Borders
+              ws[cellAddress].s.border = {
+                  top: { style: "thin", color: { auto: 1 } },
+                  bottom: { style: "thin", color: { auto: 1 } },
+                  left: { style: "thin", color: { auto: 1 } },
+                  right: { style: "thin", color: { auto: 1 } }
+              };
+
+              // 3. Alignment
+              ws[cellAddress].s.alignment = {
+                  vertical: "top",
+                  wrapText: true
+              };
+
+              // 4. Header Special Styling
+              if (R === 0) {
+                  ws[cellAddress].s.font = { bold: true, sz: 12 };
+                  ws[cellAddress].s.alignment = { horizontal: "center", vertical: "center" };
+              }
+          }
+      }
+  }
 
   XLSX.utils.book_append_sheet(wb, ws, "시나리오 상세");
   XLSX.writeFile(wb, `Scenario_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
