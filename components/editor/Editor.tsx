@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GameData, MapScene, MapObject, ObjectType } from '../../types';
 import { DEFAULT_PROBABILITY } from '../../lib/constants';
 import { generateId, blobToBase64 } from '../../lib/utils';
@@ -27,6 +27,7 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
   const [data, setData] = useState<GameData>(initialData);
   const [currentMapId, setCurrentMapId] = useState<string>(initialData.maps[0]?.id || '');
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<MapObject | null>(null);
   
   // Crop Modal State
   const [cropState, setCropState] = useState<CropState>({
@@ -145,6 +146,59 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
       onSave(newData); // Also update global/parent state
   };
 
+  // -- Copy & Paste Logic --
+  const handleCopy = useCallback(() => {
+      if (selectedObject) {
+          const clone = JSON.parse(JSON.stringify(selectedObject));
+          setClipboard(clone);
+      }
+  }, [selectedObject]);
+
+  const handlePaste = useCallback(() => {
+      if (clipboard && currentMap) {
+          const newId = generateId();
+          const newObj = { 
+              ...clipboard, 
+              id: newId, 
+              x: clipboard.x + 20, 
+              y: clipboard.y + 20,
+              label: `${clipboard.label} (Copy)`
+          };
+          
+          // Ensure it stays within bounds (optional)
+          const maxX = (currentMap.width || 1200) - newObj.width;
+          const maxY = (currentMap.height || 800) - newObj.height;
+          if (newObj.x > maxX) newObj.x = Math.max(0, maxX);
+          if (newObj.y > maxY) newObj.y = Math.max(0, maxY);
+
+          updateCurrentMap(m => ({ ...m, objects: [...m.objects, newObj] }));
+          setSelectedObjectId(newId);
+      }
+  }, [clipboard, currentMap]); // Removed updateCurrentMap from dependencies to rely on state closure or refs if needed, but here simple deps are fine.
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          // Ignore if input/textarea is focused
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+          if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+              e.preventDefault();
+              handleCopy();
+          }
+          if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+              e.preventDefault();
+              handlePaste();
+          }
+          if (e.key === 'Delete' || e.key === 'Backspace') {
+              if (selectedObjectId) handleDeleteObject(selectedObjectId);
+          }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleCopy, handlePaste, selectedObjectId]); // Add dependencies
+
   return (
     <div className="flex h-screen bg-[#2e2e2e] text-gray-100 overflow-hidden">
       <EditorSidebar 
@@ -178,6 +232,9 @@ export const Editor: React.FC<EditorProps> = ({ initialData, onSave, onBack }) =
         onUpdateMap={handleUpdateMapProperties}
         onUpdateObject={handleUpdateObject}
         onDeleteObject={handleDeleteObject}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        canPaste={!!clipboard}
         gameData={data}
       />
 

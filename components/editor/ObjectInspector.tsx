@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapScene, MapObject, ShapeType, ResultType, StatMethod } from '../../types';
-import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag } from 'lucide-react';
+import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag, Copy, ClipboardPaste } from 'lucide-react';
 import { blobToBase64 } from '../../lib/utils';
 import { ImageCropperModal, CropShape } from '../common/ImageCropperModal';
 
@@ -12,6 +12,10 @@ interface ObjectInspectorProps {
   onUpdateMap: (updates: Partial<MapScene>) => void;
   onUpdateObject: (id: string, updates: Partial<MapObject>) => void;
   onDeleteObject: (id: string) => void;
+  // New props for copy/paste
+  onCopy?: () => void;
+  onPaste?: () => void;
+  canPaste?: boolean;
   gameData?: GameData; 
 }
 
@@ -45,7 +49,7 @@ const OutcomeEditor = ({ label, resultType, color, selectedObject, onUpdateObjec
 };
 
 export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
-  mapList, currentMap, selectedObject, onUpdateMap, onUpdateObject, onDeleteObject, gameData
+  mapList, currentMap, selectedObject, onUpdateMap, onUpdateObject, onDeleteObject, onCopy, onPaste, canPaste, gameData
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectImageInputRef = useRef<HTMLInputElement>(null);
@@ -136,11 +140,26 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
   };
 
   const isSpawnPoint = selectedObject?.type === 'SPAWN_POINT';
+  const otherObjects = currentMap?.objects.filter(o => o.id !== selectedObject?.id) || [];
 
   return (
     <>
       <div className="w-80 bg-[#252525] border-l border-[#444] flex flex-col p-4 overflow-y-auto text-gray-200 custom-scrollbar">
-        <h3 className="font-bold mb-4 text-gray-300">속성 (Properties)</h3>
+        <h3 className="font-bold mb-4 text-gray-300 flex items-center justify-between">
+            <span>속성 (Properties)</span>
+            <div className="flex gap-1">
+                {onPaste && (
+                    <button 
+                        onClick={onPaste} 
+                        disabled={!canPaste}
+                        className={`p-1 rounded transition-colors ${canPaste ? 'text-indigo-400 hover:bg-[#333]' : 'text-gray-600 cursor-not-allowed'}`}
+                        title="붙여넣기 (Ctrl+V)"
+                    >
+                        <ClipboardPaste size={16} />
+                    </button>
+                )}
+            </div>
+        </h3>
         
         <div className="mb-6 p-3 bg-[#1e1e1e] rounded space-y-3 border border-[#444]">
           <div><label className="block text-xs uppercase text-gray-400 mb-1">맵 이름</label><input type="text" value={currentMap?.name || ''} onChange={(e) => onUpdateMap({ name: e.target.value })} className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200" /></div>
@@ -161,7 +180,21 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
 
         {selectedObject ? (
           <div className="space-y-4">
-            <div className="flex justify-between items-center pb-2 border-b border-[#444]"><span className="font-semibold text-emerald-400 flex items-center gap-2"><Shapes size={16} /> 오브젝트 설정</span><button onClick={() => onDeleteObject(selectedObject.id)} className="text-red-400 hover:text-red-300"><Trash2 size={16} /></button></div>
+            <div className="flex justify-between items-center pb-2 border-b border-[#444]">
+                <span className="font-semibold text-emerald-400 flex items-center gap-2">
+                    <Shapes size={16} /> 오브젝트 설정
+                </span>
+                <div className="flex gap-1">
+                    {onCopy && (
+                        <button onClick={onCopy} className="text-gray-400 hover:text-white p-1" title="복사 (Ctrl+C)">
+                            <Copy size={16} />
+                        </button>
+                    )}
+                    <button onClick={() => onDeleteObject(selectedObject.id)} className="text-red-400 hover:text-red-300 p-1" title="삭제 (Delete)">
+                        <Trash2 size={16} />
+                    </button>
+                </div>
+            </div>
             
             <div className="flex items-center justify-between gap-4">
                 <div className="flex-1"><label className="block text-xs uppercase text-gray-400 mb-1">이름 (라벨)</label><input type="text" value={selectedObject.label} onChange={(e) => onUpdateObject(selectedObject.id, { label: e.target.value })} className="w-full bg-[#383838] border border-[#555] rounded px-2 py-1 text-sm text-gray-200" /></div>
@@ -309,6 +342,49 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
                       <button className={`flex-1 text-[10px] py-1.5 rounded transition-colors ${!selectedObject.useProbability ? 'bg-indigo-600 text-white font-bold' : 'text-gray-400'}`} onClick={() => onUpdateObject(selectedObject.id, { useProbability: false })}>일반/이동</button>
                     </div>
                 </div>
+
+                {!selectedObject.useProbability && (
+                    <div className="bg-[#2a2a2a] p-3 rounded border border-[#444] space-y-3 animate-fade-in">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1"><MapPin size={12}/> 이동 및 기본 효과</p>
+                        
+                        <div>
+                            <label className="block text-[10px] text-gray-500 mb-1">이동할 맵 (Target Map)</label>
+                            <select 
+                                value={selectedObject.targetMapId || ''} 
+                                onChange={(e) => onUpdateObject(selectedObject.id, { targetMapId: e.target.value || undefined })} 
+                                className="w-full bg-[#383838] border border-[#555] rounded p-1 text-xs text-gray-200"
+                            >
+                                <option value="">(이동 없음)</option>
+                                {mapList.map((m:any) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                            </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                             <div>
+                                <label className="block text-[10px] text-gray-500 mb-1 flex items-center gap-1"><Eye size={10} className="text-emerald-500"/> 공개할 대상</label>
+                                <select 
+                                    value={selectedObject.revealObjectId || ''} 
+                                    onChange={(e) => onUpdateObject(selectedObject.id, { revealObjectId: e.target.value || undefined })} 
+                                    className="w-full bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-gray-200"
+                                >
+                                    <option value="">(없음)</option>
+                                    {otherObjects.map((o:any) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                                </select>
+                             </div>
+                             <div>
+                                <label className="block text-[10px] text-gray-500 mb-1 flex items-center gap-1"><EyeOff size={10} className="text-red-500"/> 숨길 대상</label>
+                                <select 
+                                    value={selectedObject.hideObjectId || ''} 
+                                    onChange={(e) => onUpdateObject(selectedObject.id, { hideObjectId: e.target.value || undefined })} 
+                                    className="w-full bg-[#383838] border border-[#555] rounded p-1 text-[10px] text-gray-200"
+                                >
+                                    <option value="">(없음)</option>
+                                    {otherObjects.map((o:any) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                                </select>
+                             </div>
+                        </div>
+                    </div>
+                )}
 
                 {selectedObject.useProbability && (
                     <div className="bg-indigo-900/10 p-3 rounded border border-indigo-500/30 space-y-3">

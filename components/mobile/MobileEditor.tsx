@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { GameData, MapScene, MapObject, ObjectType } from '../../types';
 import { DEFAULT_PROBABILITY } from '../../lib/constants';
 import { generateId } from '../../lib/utils';
@@ -22,6 +22,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
   const [currentMapId, setCurrentMapId] = useState<string>(initialData.maps[0]?.id || '');
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('CANVAS');
+  const [clipboard, setClipboard] = useState<MapObject | null>(null);
   
   const [cropState, setCropState] = useState<{isOpen: boolean; file: File|null; onConfirm: (b:string)=>void}>({isOpen:false, file:null, onConfirm:()=>{}});
 
@@ -87,6 +88,31 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
     setSelectedObjectId(null);
     setActiveTab('CANVAS');
   };
+
+  const handleCopy = useCallback(() => {
+      if (selectedObject) {
+          const clone = JSON.parse(JSON.stringify(selectedObject));
+          setClipboard(clone);
+          alert("오브젝트가 복사되었습니다.");
+      }
+  }, [selectedObject]);
+
+  const handlePaste = useCallback(() => {
+      if (clipboard && currentMap) {
+          const newId = generateId();
+          const newObj = { 
+              ...clipboard, 
+              id: newId, 
+              x: clipboard.x + 20, 
+              y: clipboard.y + 20,
+              label: `${clipboard.label} (Copy)`
+          };
+          
+          updateCurrentMap(m => ({ ...m, objects: [...m.objects, newObj] }));
+          setSelectedObjectId(newId);
+          setActiveTab('CANVAS'); // Switch to canvas to see it
+      }
+  }, [clipboard, currentMap]);
 
   // -- Touch Dragging Logic --
   const [isDragging, setIsDragging] = useState(false);
@@ -186,6 +212,9 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({ initialData, onSave,
                         onUpdateMap={(u) => updateCurrentMap(m => ({ ...m, ...u }))} 
                         onUpdateObject={handleUpdateObject} 
                         onDeleteObject={handleDeleteObject} 
+                        onCopy={handleCopy}
+                        onPaste={handlePaste}
+                        canPaste={!!clipboard}
                     />
                 </div>
             )}

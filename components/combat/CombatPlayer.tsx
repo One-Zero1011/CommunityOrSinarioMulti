@@ -300,7 +300,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
             
             if (targetEntity && targetStatDef) {
                 const currentVal = targetEntity.stats[impact.targetStatId] || 0;
-                let newVal = currentVal;
+                let newVal: number = currentVal;
                 
                 if (impact.operation === 'SUBTRACT') {
                     const minLimit = (rules.deathStatId === impact.targetStatId) ? 0 : targetStatDef.min;
