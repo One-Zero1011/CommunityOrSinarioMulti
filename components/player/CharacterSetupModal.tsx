@@ -68,7 +68,8 @@ export const CharacterSetupModal: React.FC<CharacterSetupModalProps> = ({ gameDa
             stats,
             x: 100 + (Math.random() * 200),
             y: 300 + (Math.random() * 200),
-            mapId: gameData.startMapId || gameData.maps[0]?.id
+            mapId: gameData.startMapId || gameData.maps[0]?.id,
+            interactedObjectIds: []
         };
 
         onAdd(newChar);

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GameData, MapScene, MapObject, ShapeType, ResultType, StatMethod } from '../../types';
-import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag, Copy, ClipboardPaste } from 'lucide-react';
+import { Shapes, Trash2, Palette, FileText, Dices, Upload, MapPin, MousePointer2, Image as ImageIcon, X, Eye, EyeOff, Layers, ShieldAlert, Box, ChevronUp, ChevronDown, BringToFront, SendToBack, Settings2, Target, HelpCircle, Info, Maximize, Flag, Copy, ClipboardPaste, CheckCircle2 } from 'lucide-react';
 import { blobToBase64 } from '../../lib/utils';
 import { ImageCropperModal, CropShape } from '../common/ImageCropperModal';
 
@@ -348,9 +348,23 @@ export const ObjectInspector: React.FC<ObjectInspectorProps> = ({
               <div className="space-y-4 pt-2 border-t border-[#444]">
                 <div>
                     <label className="block text-xs font-bold text-gray-300 mb-2">상호작용 방식</label>
-                    <div className="flex bg-[#1e1e1e] rounded p-1 gap-1 border border-[#444]">
+                    <div className="flex bg-[#1e1e1e] rounded p-1 gap-1 border border-[#444] mb-2">
                       <button className={`flex-1 text-[10px] py-1.5 rounded transition-colors ${selectedObject.useProbability ? 'bg-indigo-600 text-white font-bold' : 'text-gray-400'}`} onClick={() => onUpdateObject(selectedObject.id, { useProbability: true })}>판정 (Stat/Dice)</button>
                       <button className={`flex-1 text-[10px] py-1.5 rounded transition-colors ${!selectedObject.useProbability ? 'bg-indigo-600 text-white font-bold' : 'text-gray-400'}`} onClick={() => onUpdateObject(selectedObject.id, { useProbability: false })}>일반/이동</button>
+                    </div>
+                    {/* Single Use Toggle */}
+                    <div className="flex items-center gap-2 bg-[#252525] p-2 rounded border border-[#444]">
+                        <input 
+                            type="checkbox" 
+                            id="singleUseCheck" 
+                            checked={selectedObject.isSingleUse || false} 
+                            onChange={(e) => onUpdateObject(selectedObject.id, { isSingleUse: e.target.checked })}
+                            className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-500 rounded focus:ring-indigo-500"
+                        />
+                        <label htmlFor="singleUseCheck" className="text-xs text-gray-300 font-bold flex items-center gap-1 cursor-pointer">
+                            <CheckCircle2 size={12} className={selectedObject.isSingleUse ? "text-indigo-400" : "text-gray-600"}/>
+                            1회성 상호작용 (One-time)
+                        </label>
                     </div>
                 </div>
 

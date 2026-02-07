@@ -8,7 +8,7 @@ import { PlayerSidebar } from '../player/PlayerSidebar';
 import { rollDice } from '../../lib/game-logic';
 import { getShapeStyle as getShapeStyleLib } from '../../lib/styles';
 import { generateId } from '../../lib/utils';
-import { Menu, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, User, Megaphone } from 'lucide-react';
+import { Menu, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, User, Megaphone, Check } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 
@@ -187,14 +187,33 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
   };
   const handleObjectClickLogic = (obj: MapObject) => {
     if (obj.type === 'SPAWN_POINT') return;
+    
+    // Single Use Check
+    if (obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id)) {
+        return; 
+    }
+
     if ((obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId)) && (!obj.description || obj.description.trim() === '')) { if (obj.targetMapId) { handleMoveLogic(obj.targetMapId); return; } }
     let res: any = { objectName: obj.label, description: obj.description, hasRoll: false };
     if (obj.useProbability && obj.data) {
         const type = rollDice(obj.data); const outcome = obj.data.outcomes[type];
-        setCharacters(prev => prev.map(c => c.id === activeCharId ? { ...c, hp: Math.min(c.maxHp, c.hp + outcome.hpChange), inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory } : c));
+        setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
+            ...c, 
+            hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
+            inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory,
+            interactedObjectIds: obj.isSingleUse ? [...(c.interactedObjectIds || []), obj.id] : c.interactedObjectIds
+        } : c));
         res = { ...res, hasRoll: true, type, outcome };
         if (outcome.targetMapId) res.targetMapId = outcome.targetMapId;
-    } else if (obj.targetMapId) res.targetMapId = obj.targetMapId;
+    } else {
+        if (obj.targetMapId) res.targetMapId = obj.targetMapId;
+        if (obj.isSingleUse) {
+             setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
+                ...c, 
+                interactedObjectIds: [...(c.interactedObjectIds || []), obj.id] 
+            } : c));
+        }
+    }
     if (res.targetMapId) res.targetMapName = stateRef.current.gameData.maps.find(m => m.id === res.targetMapId)?.name;
     setInteractionResult(res);
   };
@@ -215,7 +234,8 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
         inventory: [], 
         mapId: stateRef.current.currentMapId, 
         x: pos.x, 
-        y: pos.y 
+        y: pos.y,
+        interactedObjectIds: []
     };
     setCharacters(prev => [...prev, newChar]);
     if (networkMode === 'HOST') { 
@@ -313,9 +333,17 @@ export const MobilePlayer: React.FC<MobilePlayerProps> = ({ gameData: initialGam
                        }
                        return null;
                     }
+                    
+                    const isUsed = obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id);
+
                     return (
-                      <div key={obj.id} onClick={() => handleObjectClick(obj)} className={`absolute active:opacity-70 ${obj.hidden ? 'opacity-40 grayscale' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', zIndex: obj.zIndex ?? 10, ...getShapeStyleLib(obj.shape) }}>
-                           {obj.type !== 'DECORATION' && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md bg-black/30">{obj.label}</span>}
+                      <div key={obj.id} onClick={() => !isUsed && handleObjectClick(obj)} className={`absolute active:opacity-70 ${obj.hidden ? 'opacity-40 grayscale' : ''} ${isUsed ? 'opacity-50 grayscale' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', zIndex: obj.zIndex ?? 10, ...getShapeStyleLib(obj.shape) }}>
+                           {obj.type !== 'DECORATION' && (
+                               <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md bg-black/30 ${isUsed ? 'line-through text-gray-400' : ''}`}>
+                                   {isUsed && <Check size={8} className="mr-1 text-emerald-400"/>}
+                                   {obj.label}
+                               </span>
+                           )}
                            {obj.hidden && <div className="absolute top-0 right-0 bg-black/80 px-1 rounded text-[7px] text-orange-400 border border-orange-400/50">H</div>}
                       </div>
                     );

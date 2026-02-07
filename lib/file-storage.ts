@@ -71,12 +71,12 @@ export const exportGameDataToExcel = (data: GameData) => {
 
   // 1. Header Row
   rows.push([
-    "세부장소 (Map)", 
-    "오브젝트 (Object)", 
-    "조건/판정 (Condition)", 
-    "효과/이동 (Effect)", 
-    "내용 (서술)", 
-    "조사 가능 구역 (Visible Zone)"
+    "구역 (Map)", 
+    "분류 (Category)", 
+    "이름 (Name)", 
+    "조건 (Condition)", 
+    "효과 (Effect)", 
+    "내용 (Description)"
   ]);
 
   // Helper to find object label by ID
@@ -86,7 +86,7 @@ export const exportGameDataToExcel = (data: GameData) => {
           const found = m.objects.find(o => o.id === id);
           if (found) return found.label;
       }
-      return id; // Fallback to ID if not found
+      return id; 
   };
 
   // Helper to find map name by ID
@@ -96,88 +96,113 @@ export const exportGameDataToExcel = (data: GameData) => {
       return m ? m.name : id;
   };
 
-  let rowIndex = 1; // Current row index (0-based, starting after header)
+  let rowIndex = 1; // Current row index (0-based from rows array perspective)
 
   data.maps.forEach(map => {
-    // [New Feature] Add Map Description Row if exists
-    if (map.description && map.description.trim() !== "") {
-        rows.push([map.description]);
-        merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } }); // Merge row across 6 columns
+    // === MAP HEADER SECTION ===
+    // Empty row before new map (except first one)
+    if (rowIndex > 1) {
+        rows.push(["", "", "", "", "", ""]);
         rowIndex++;
     }
 
-    const mapStartRow = rowIndex;
-    
-    // Generate a summary string of visible objects for the last column
-    const visibleObjectsStr = map.objects
-        .filter(o => !o.hidden && (o.type === 'OBJECT' || o.type === 'MAP_LINK'))
-        .map(o => `[ ${o.label} ]`)
-        .join("  ");
+    // Map Title Row
+    rows.push([`📍 [${map.name}]`, "", "", "", "", ""]);
+    merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
+    rowIndex++;
 
-    if (map.objects.length === 0) {
-        // Empty map case
-        rows.push([map.name, "(오브젝트 없음)", "", "", "", ""]);
+    // Map Description Row
+    if (map.description && map.description.trim() !== "") {
+        rows.push([`📄 서술: ${map.description}`, "", "", "", "", ""]);
+        merges.push({ s: { r: rowIndex, c: 0 }, e: { r: rowIndex, c: 5 } });
         rowIndex++;
-    } else {
-        map.objects.forEach(obj => {
-            const objStartRow = rowIndex;
+    }
 
-            // --- Row A: Basic Description (Always present) ---
+    // Separate Objects
+    const interactables = map.objects.filter(o => o.type === 'OBJECT' || o.type === 'MAP_LINK');
+    const decorations = map.objects.filter(o => o.type === 'DECORATION' || o.type === 'SPAWN_POINT');
+
+    // === SECTION 1: INTERACTABLES ===
+    if (interactables.length > 0) {
+        interactables.forEach(obj => {
+            const objStartRow = rowIndex;
+            const objTypeLabel = obj.type === 'MAP_LINK' ? '이동' : '조사';
+
+            // Base Info & Default Effect
             const baseEffects: string[] = [];
-            if (obj.targetMapId) baseEffects.push(`이동: ${findMapName(obj.targetMapId)}`);
-            if (obj.revealObjectId) baseEffects.push(`공개: ${findObjLabel(obj.revealObjectId)}`);
-            if (obj.hideObjectId) baseEffects.push(`숨김: ${findObjLabel(obj.hideObjectId)}`);
+            if (obj.targetMapId) baseEffects.push(`➡ 이동: ${findMapName(obj.targetMapId)}`);
+            if (obj.revealObjectId) baseEffects.push(`👁 공개: ${findObjLabel(obj.revealObjectId)}`);
+            if (obj.hideObjectId) baseEffects.push(`🚫 숨김: ${findObjLabel(obj.hideObjectId)}`);
+            if (obj.isSingleUse) baseEffects.push(`1회성`);
 
             rows.push([
-                map.name,                 // Col 0: Map Name
-                obj.label,                // Col 1: Object Name
-                "기본 (Default)",         // Col 2: Condition
-                baseEffects.join("\n"),   // Col 3: Effect
-                obj.description || "",    // Col 4: Description
-                visibleObjectsStr         // Col 5: Visible Zone
+                map.name,                 
+                objTypeLabel,             
+                obj.label,                
+                "기본 (Default)",         
+                baseEffects.join("\n"),   
+                obj.description || ""     
             ]);
             rowIndex++;
 
-            // --- Row B~E: Probability Outcomes ---
+            // Probability Outcomes (Sub-rows)
             if (obj.useProbability && obj.data) {
                 const outcomes = [
-                    { label: "대성공", data: obj.data.outcomes.CRITICAL_SUCCESS },
-                    { label: "성공", data: obj.data.outcomes.SUCCESS },
-                    { label: "실패", data: obj.data.outcomes.FAILURE },
-                    { label: "대실패", data: obj.data.outcomes.CRITICAL_FAILURE },
+                    { label: "  ↳ 대성공", data: obj.data.outcomes.CRITICAL_SUCCESS },
+                    { label: "  ↳ 성공", data: obj.data.outcomes.SUCCESS },
+                    { label: "  ↳ 실패", data: obj.data.outcomes.FAILURE },
+                    { label: "  ↳ 대실패", data: obj.data.outcomes.CRITICAL_FAILURE },
                 ];
 
                 outcomes.forEach(outcome => {
                     const effs: string[] = [];
                     if (outcome.data.hpChange !== 0) effs.push(`HP ${outcome.data.hpChange > 0 ? '+' : ''}${outcome.data.hpChange}`);
-                    if (outcome.data.itemDrop) effs.push(`획득: ${outcome.data.itemDrop}`);
-                    if (outcome.data.targetMapId) effs.push(`이동: ${findMapName(outcome.data.targetMapId)}`);
-                    if (outcome.data.revealObjectId) effs.push(`공개: ${findObjLabel(outcome.data.revealObjectId)}`);
-                    if (outcome.data.hideObjectId) effs.push(`숨김: ${findObjLabel(outcome.data.hideObjectId)}`);
+                    if (outcome.data.itemDrop) effs.push(`📦 획득: ${outcome.data.itemDrop}`);
+                    if (outcome.data.targetMapId) effs.push(`➡ 이동: ${findMapName(outcome.data.targetMapId)}`);
+                    if (outcome.data.revealObjectId) effs.push(`👁 공개: ${findObjLabel(outcome.data.revealObjectId)}`);
+                    if (outcome.data.hideObjectId) effs.push(`🚫 숨김: ${findObjLabel(outcome.data.hideObjectId)}`);
 
                     rows.push([
                         map.name,
+                        objTypeLabel,
                         obj.label,
                         outcome.label,
                         effs.join("\n"),
-                        outcome.data.text,
-                        visibleObjectsStr
+                        outcome.data.text
                     ]);
                     rowIndex++;
                 });
             }
 
-            // Merge Object Name Column (if it spans multiple rows)
+            // Merge "Object Name" and "Category" cells for clarity if it spans multiple rows
             if (rowIndex - 1 > objStartRow) {
-                merges.push({ s: { r: objStartRow, c: 1 }, e: { r: rowIndex - 1, c: 1 } });
+                merges.push({ s: { r: objStartRow, c: 1 }, e: { r: rowIndex - 1, c: 1 } }); // Merge Category
+                merges.push({ s: { r: objStartRow, c: 2 }, e: { r: rowIndex - 1, c: 2 } }); // Merge Name
             }
         });
+    } else {
+        rows.push([map.name, "조사", "(없음)", "-", "-", "-"]);
+        rowIndex++;
     }
 
-    // Merge Map Name Column & Visible Zone Column (if they span multiple rows)
-    if (rowIndex - 1 > mapStartRow) {
-        merges.push({ s: { r: mapStartRow, c: 0 }, e: { r: rowIndex - 1, c: 0 } }); // Map Name
-        merges.push({ s: { r: mapStartRow, c: 5 }, e: { r: rowIndex - 1, c: 5 } }); // Visible Zone
+    // === SECTION 2: DECORATIONS ===
+    if (decorations.length > 0) {
+        // Separator for Decorations
+        rows.push([map.name, "장식/기타", "---- 환경 요소 ----", "", "", ""]);
+        rowIndex++;
+
+        decorations.forEach(obj => {
+            const typeLabel = obj.type === 'SPAWN_POINT' ? '시작 지점' : '장식';
+            rows.push([
+                map.name,
+                typeLabel,
+                obj.label,
+                "-",
+                "-",
+                obj.description || "(설명 없음)"
+            ]);
+            rowIndex++;
+        });
     }
   });
 
@@ -188,14 +213,14 @@ export const exportGameDataToExcel = (data: GameData) => {
       ws['!merges'] = merges;
   }
 
-  // Set Column Widths for better readability
+  // Set Column Widths
   const wscols = [
-      { wch: 20 }, // Map Name
-      { wch: 25 }, // Object Name
+      { wch: 15 }, // Map Name
+      { wch: 10 }, // Category
+      { wch: 20 }, // Object Name
       { wch: 15 }, // Condition
       { wch: 25 }, // Effect
       { wch: 60 }, // Description Text
-      { wch: 40 }, // Visible Zone Summary
   ];
   ws['!cols'] = wscols;
 

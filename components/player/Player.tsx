@@ -152,6 +152,13 @@ export const Player: React.FC<PlayerProps> = ({
   const handleObjectClickLogic = (obj: MapObject) => {
     if (obj.type === 'SPAWN_POINT') return; // Ignore clicks on spawn points
     
+    // Single Use Check
+    if (obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id)) {
+        // Already used
+        // alert("이미 조사한 대상입니다."); // Optional: Alert or just ignore
+        return; 
+    }
+
     if ((obj.type === 'MAP_LINK' || (!obj.useProbability && obj.targetMapId)) && (!obj.description || obj.description.trim() === '')) {
       if (obj.targetMapId) { handleMoveLogic(obj.targetMapId); return; }
     }
@@ -163,12 +170,28 @@ export const Player: React.FC<PlayerProps> = ({
         const { result: resultType, details } = rollStatChallenge(obj, activeChar, gameData.customStats || []);
         const outcome = obj.data.outcomes[resultType];
         applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
-        setCharacters(prev => prev.map(c => c.id === activeCharId ? { ...c, hp: Math.min(c.maxHp, c.hp + outcome.hpChange), inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory } : c));
+        
+        // Update character state (HP, Inventory, History)
+        setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
+            ...c, 
+            hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
+            inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory,
+            interactedObjectIds: obj.isSingleUse ? [...(c.interactedObjectIds || []), obj.id] : c.interactedObjectIds 
+        } : c));
+
         resultData = { ...resultData, hasRoll: true, type: resultType, outcome, rollDetails: details };
         if (outcome.targetMapId) resultData.targetMapId = outcome.targetMapId;
     } else {
         applyVisibilityTriggers(obj.revealObjectId, obj.hideObjectId);
         if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
+        
+        // Mark as used for simple objects too
+        if (obj.isSingleUse) {
+             setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
+                ...c, 
+                interactedObjectIds: [...(c.interactedObjectIds || []), obj.id] 
+            } : c));
+        }
     }
     if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
     setInteractionResult(resultData);
@@ -223,11 +246,37 @@ export const Player: React.FC<PlayerProps> = ({
                           }
                           return null; // Hide spawn points for players
                       }
+                      
+                      // Check if already used
+                      const isUsed = obj.isSingleUse && activeChar && activeChar.interactedObjectIds?.includes(obj.id);
+
                       return (
-                        <button key={obj.id} onClick={() => handleObjectClick(obj)} className={`absolute transition-all duration-200 hover:scale-105 active:scale-95 group ${obj.hidden ? 'opacity-40 grayscale-[0.5]' : ''}`} style={{ left: obj.x, top: obj.y, width: obj.width, height: obj.height, backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, backgroundImage: obj.image ? `url(${obj.image})` : undefined, backgroundSize: 'cover', zIndex: obj.zIndex ?? 10, ...getShapeStyleLib(obj.shape) }}>
+                        <button 
+                            key={obj.id} 
+                            onClick={() => !isUsed && handleObjectClick(obj)} 
+                            className={`absolute transition-all duration-200 group ${obj.hidden ? 'opacity-40 grayscale-[0.5]' : ''} ${isUsed ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:scale-105 active:scale-95 cursor-pointer'}`} 
+                            style={{ 
+                                left: obj.x, top: obj.y, width: obj.width, height: obj.height, 
+                                backgroundColor: obj.type === 'DECORATION' ? 'transparent' : obj.color, 
+                                backgroundImage: obj.image ? `url(${obj.image})` : undefined, 
+                                backgroundSize: 'cover', 
+                                zIndex: obj.zIndex ?? 10, 
+                                ...getShapeStyleLib(obj.shape) 
+                            }}
+                            disabled={!!isUsed}
+                        >
                             {obj.hidden && <div className="absolute top-1 right-1 bg-black/80 p-0.5 rounded text-[8px] text-orange-400 border border-orange-400/50 z-50">HIDDEN</div>}
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-gray-600 z-50">{obj.label} {obj.targetMapId && '➡'}</div>
-                            <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow-md pointer-events-none">{obj.type !== 'DECORATION' && <span className="bg-black/40 px-1 rounded">{obj.label}</span>}</span>
+                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black/80 px-2 py-1 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-gray-600 z-50">
+                                {obj.label} {obj.targetMapId && '➡'} {isUsed && '(완료)'}
+                            </div>
+                            <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow-md pointer-events-none">
+                                {obj.type !== 'DECORATION' && (
+                                    <span className={`bg-black/40 px-1 rounded flex items-center gap-1 ${isUsed ? 'line-through text-gray-400' : ''}`}>
+                                        {isUsed && <Check size={10} className="text-emerald-400"/>}
+                                        {obj.label}
+                                    </span>
+                                )}
+                            </span>
                         </button>
                       );
                     } else {

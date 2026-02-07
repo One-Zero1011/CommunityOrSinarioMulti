@@ -49,6 +49,7 @@ export interface MapObject {
   
   // Investigation Logic
   useProbability?: boolean;
+  isSingleUse?: boolean; // New: 1회성 상호작용 여부
   statMethod?: StatMethod;
   targetStatId?: string;
   difficultyValue?: number; // Used for DIFFICULTY method
@@ -124,7 +125,7 @@ export type CombatPhase = 'ACTION' | 'RESPONSE';
 export interface PendingCombatAction { type: 'ATTACK'; sourceId: string; targetId: string; damageValue: number; maxDie: number; }
 export interface CombatSession { isActive: boolean; currentTurnPlayerId: string | null; combatBlockId: string; turnCount: number; phase: CombatPhase; pendingAction: PendingCombatAction | null; logs: CombatLogEntry[]; factionDamage: Record<string, number>; fledPlayerIds: string[]; turnOrder: string[]; }
 export type GlobalCombatState = Record<string, CombatSession>;
-export interface Character { id: string; name: string; desc?: string; avatar?: string; hp: number; maxHp: number; inventory: string[]; mapId?: string; x: number; y: number; stats?: Record<string, number>; }
+export interface Character { id: string; name: string; desc?: string; avatar?: string; hp: number; maxHp: number; inventory: string[]; mapId?: string; x: number; y: number; stats?: Record<string, number>; interactedObjectIds?: string[]; }
 export interface LogEntry { id: string; timestamp: number; characterName: string; action: string; resultType: ResultType; systemText: string; userText: string; }
 export interface ChatMessage { id: string; senderName: string; text: string; timestamp: number; isSystem?: boolean; }
 export interface FactionChatMessage { id: string; senderName: string; senderId: string; senderFactionId: string; text: string; timestamp: number; channel: 'TEAM' | 'BLOCK'; targetId: string; }
