@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { GameData, MapObject, Character, ResultType, OutcomeDef, ChatMessage } from '../../types';
-import { rollStatChallenge, getResultColor, getResultLabel, RollDetails } from '../../lib/game-logic';
+import { rollStatChallenge, getResultColor, getResultLabel, RollDetails, checkGlobalConditions, applyGlobalOperations } from '../../lib/game-logic';
 import { getShapeStyle as getShapeStyleLib } from '../../lib/styles';
 import { generateId } from '../../lib/utils';
 import { PlayerHUD } from './PlayerHUD';
@@ -157,6 +157,14 @@ export const Player: React.FC<PlayerProps> = ({
       } 
   };
 
+  // Helper to sync global variables across network
+  const syncGlobalVariables = (newData: GameData) => {
+      setGameData(newData);
+      if (networkMode === 'HOST') {
+          broadcast({ type: 'SYNC_GAMEDATA', payload: newData });
+      }
+  };
+
   // 1. Initial Click Handler (Determines if menu is needed)
   const handleObjectClick = (obj: MapObject) => { 
       if (obj.type === 'SPAWN_POINT') return;
@@ -204,7 +212,11 @@ export const Player: React.FC<PlayerProps> = ({
               if (type === 'INSPECT' || (type === 'BASIC' && !obj.useProbability)) {
                   sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
               } else if (type === 'BASIC') {
-                  setInteractionResult({ objectName: obj.label, description: obj.description, hasRoll: false });
+                  // Basic interaction check happens on client for immediate feedback if solo, but logic is on host usually.
+                  // However, for pure description viewing, simple check is ok.
+                  // But we need to check variables. Client might not have latest state if not synced perfectly?
+                  // Better to request from host to ensure consistency.
+                  sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
               }
           }
       } else {
@@ -224,16 +236,25 @@ export const Player: React.FC<PlayerProps> = ({
         return;
     }
 
+    const currentState = stateRef.current;
+    const globalVars = currentState.gameData.globalVariables || [];
+
     // Custom Sub Action Logic
     if (type === 'CUSTOM' && subActionId) {
         const subAction = obj.subActions?.find(a => a.id === subActionId);
         if (subAction) {
+            // Check Requirements
+            const check = checkGlobalConditions(globalVars, subAction.reqConditions);
+            if (!check.passed) {
+                alert(`조건 불충족: ${check.reason}`);
+                return;
+            }
+
             // Check for PROBABILITY or BASIC sub-action
             if (subAction.actionType === 'PROBABILITY' && subAction.data) {
                 // Perform Roll Logic for Sub Action
                 if (!activeChar) { alert("탐사자를 먼저 생성해주세요."); return; }
                 
-                // Create a temporary object-like structure for the rolling function
                 const tempObj = { 
                     ...obj, // Base properties
                     useProbability: true,
@@ -250,6 +271,10 @@ export const Player: React.FC<PlayerProps> = ({
                 // Apply Effects
                 applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
                 
+                // Variable Operations (Outcome)
+                const newVars = applyGlobalOperations(globalVars, outcome.operations);
+                if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+
                 setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
                     ...c, 
                     hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
@@ -273,6 +298,10 @@ export const Player: React.FC<PlayerProps> = ({
                 // Basic Action
                 applyVisibilityTriggers(subAction.revealObjectId, subAction.hideObjectId);
                 
+                // Variable Operations (Basic)
+                const newVars = applyGlobalOperations(globalVars, subAction.operations);
+                if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+
                 const resultData: any = { 
                     objectName: obj.label, 
                     description: `[${subAction.label}]\n${subAction.text || ''}`, 
@@ -287,8 +316,19 @@ export const Player: React.FC<PlayerProps> = ({
         return;
     }
 
+    // Main Object Requirement Check
+    const mainCheck = checkGlobalConditions(globalVars, obj.reqConditions);
+    if (!mainCheck.passed) {
+        alert(`조건 불충족: ${mainCheck.reason}`);
+        return;
+    }
+
     // Basic Logic (Just Description)
     if (type === 'BASIC') {
+        // Variable Operations (Basic Main Object)
+        const newVars = applyGlobalOperations(globalVars, obj.operations);
+        if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+
         setInteractionResult({ objectName: obj.label, description: obj.description, hasRoll: false });
         return;
     }
@@ -311,6 +351,10 @@ export const Player: React.FC<PlayerProps> = ({
         const outcome = obj.data.outcomes[resultType];
         applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
         
+        // Variable Operations (Outcome)
+        const newVars = applyGlobalOperations(globalVars, outcome.operations);
+        if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+
         // Update character state
         setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
             ...c, 
@@ -324,6 +368,10 @@ export const Player: React.FC<PlayerProps> = ({
     } else {
         // Fallback for non-prob object treated as Inspect (shouldn't happen often)
         applyVisibilityTriggers(obj.revealObjectId, obj.hideObjectId);
+        // Basic operations applied here if somehow reached
+        const newVars = applyGlobalOperations(globalVars, obj.operations);
+        if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+
         if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
         if (obj.isSingleUse) {
              setCharacters(prev => prev.map(c => c.id === activeCharId ? { 

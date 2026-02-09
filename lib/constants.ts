@@ -25,7 +25,9 @@ export const DEFAULT_MAP: MapScene = {
 export const INITIAL_GAME_DATA: GameData = {
   title: "새로운 조사",
   maps: [DEFAULT_MAP],
-  startMapId: 'map_001'
+  startMapId: 'map_001',
+  customStats: [],
+  globalVariables: [] // Initialize empty variables
 };
 
 // -- Faction Data --

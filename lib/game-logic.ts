@@ -1,5 +1,5 @@
 
-import { ProbabilityProfile, ResultType, WeightedValue, MapObject, CustomStatDef, Character } from '../types';
+import { ProbabilityProfile, ResultType, WeightedValue, MapObject, CustomStatDef, Character, GlobalVariable, VariableCondition, VariableOperation } from '../types';
 
 export interface RollDetails {
     method: string;
@@ -10,6 +10,93 @@ export interface RollDetails {
     targetValue: number;
     isSuccess: boolean;
 }
+
+// --- Variable Logic ---
+
+export const checkGlobalConditions = (
+    variables: GlobalVariable[],
+    conditions?: VariableCondition[]
+): { passed: boolean; reason?: string } => {
+    if (!conditions || conditions.length === 0) return { passed: true };
+
+    for (const cond of conditions) {
+        const variable = variables.find(v => v.id === cond.variableId);
+        if (!variable) {
+            // Variable definition missing, treat as fail or skip? Fail is safer.
+            return { passed: false, reason: `Condition Check Error: Variable not found.` };
+        }
+
+        const varValue = variable.initialValue; // Current value is stored in 'initialValue' field in runtime for simplicity
+        const targetValue = cond.value;
+
+        // Type safety checks (basic)
+        if (variable.type === 'NUMBER') {
+            const numVar = Number(varValue);
+            const numTarget = Number(targetValue);
+            switch (cond.operator) {
+                case 'EQUALS': if (numVar !== numTarget) return { passed: false, reason: `${variable.name} (${numVar}) is not ${numTarget}` }; break;
+                case 'NOT_EQUALS': if (numVar === numTarget) return { passed: false, reason: `${variable.name} (${numVar}) cannot be ${numTarget}` }; break;
+                case 'GREATER_THAN': if (!(numVar > numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be > ${numTarget}` }; break;
+                case 'LESS_THAN': if (!(numVar < numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be < ${numTarget}` }; break;
+                case 'GREATER_EQUAL': if (!(numVar >= numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be >= ${numTarget}` }; break;
+                case 'LESS_EQUAL': if (!(numVar <= numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be <= ${numTarget}` }; break;
+            }
+        } else {
+            // String / Boolean: Only Equals / Not Equals usually
+            // Boolean handling for strings
+            const strVar = String(varValue);
+            const strTarget = String(targetValue);
+            switch (cond.operator) {
+                case 'EQUALS': if (strVar !== strTarget) return { passed: false, reason: `${variable.name} condition failed.` }; break;
+                case 'NOT_EQUALS': if (strVar === strTarget) return { passed: false, reason: `${variable.name} condition failed.` }; break;
+                default: 
+                    // Other operators not supported for non-numbers, ignore or fail
+                    break;
+            }
+        }
+    }
+
+    return { passed: true };
+};
+
+export const applyGlobalOperations = (
+    variables: GlobalVariable[],
+    operations?: VariableOperation[]
+): GlobalVariable[] => {
+    if (!operations || operations.length === 0) return variables;
+
+    // Create a deep copy to avoid mutating state directly if passed by ref
+    const newVariables = variables.map(v => ({ ...v }));
+
+    operations.forEach(op => {
+        const variable = newVariables.find(v => v.id === op.variableId);
+        if (!variable) return;
+
+        if (variable.type === 'NUMBER') {
+            const numVal = Number(variable.initialValue);
+            const opVal = Number(op.value || 0);
+            switch (op.operator) {
+                case 'SET': variable.initialValue = opVal; break;
+                case 'ADD': variable.initialValue = numVal + opVal; break;
+                case 'SUBTRACT': variable.initialValue = numVal - opVal; break;
+            }
+        } else if (variable.type === 'BOOLEAN') {
+            switch (op.operator) {
+                case 'SET': variable.initialValue = String(op.value) === 'true'; break;
+                case 'TOGGLE': variable.initialValue = !variable.initialValue; break;
+            }
+        } else {
+            // String
+            if (op.operator === 'SET') {
+                variable.initialValue = String(op.value);
+            }
+        }
+    });
+
+    return newVariables;
+};
+
+// --- Existing Logic ---
 
 export const rollDice = (profile: ProbabilityProfile): ResultType => {
   const roll = Math.random() * 100;

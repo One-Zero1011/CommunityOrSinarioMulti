@@ -1,7 +1,7 @@
 
 import React, { useRef, useState } from 'react';
-import { GameData, CustomStatDef, DiceRange } from '../../types';
-import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle, Key, UserCog, Trash2, Heart, Hash } from 'lucide-react';
+import { GameData, CustomStatDef, DiceRange, GlobalVariable, VariableType } from '../../types';
+import { Plus, Map as MapIcon, Save, Download, ArrowLeft, RotateCcw, Upload, FileSpreadsheet, Settings, AlertTriangle, Key, UserCog, Trash2, Heart, Hash, Database, Type, ToggleLeft, ToggleRight } from 'lucide-react';
 import { exportGameDataToZip, exportGameDataToExcel, loadGameDataFromFile } from '../../lib/file-storage';
 import { useAutoSave } from '../../hooks/useAutoSave';
 import { Button } from '../common/Button';
@@ -29,6 +29,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
 }) => {
   const [autoSaveInterval, setAutoSaveInterval] = useState<number>(10000); 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isVariablesOpen, setIsVariablesOpen] = useState(false); // Variable Modal State
   const [confirmation, setConfirmation] = useState<ConfirmationState>({
     isOpen: false,
     type: null,
@@ -38,6 +39,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
   const { hasAutosave, lastAutoSaveTime, loadAutosave } = useAutoSave(data, autoSaveInterval);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // --- Stats Logic ---
   const handleAddCustomStat = () => {
     const newStat: CustomStatDef = {
       id: generateId(),
@@ -76,6 +78,39 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
       handleUpdateCustomStat(statId, { diceRanges: newRanges });
   };
 
+  // --- Variables Logic ---
+  const handleAddVariable = () => {
+      const newVar: GlobalVariable = {
+          id: generateId(),
+          name: `변수_${(data.globalVariables?.length || 0) + 1}`,
+          type: 'NUMBER',
+          initialValue: 0
+      };
+      onSave({ ...data, globalVariables: [...(data.globalVariables || []), newVar] });
+  };
+
+  const handleUpdateVariable = (id: string, updates: Partial<GlobalVariable>) => {
+      const updatedVars = (data.globalVariables || []).map(v => {
+          if (v.id === id) {
+              const newVar = { ...v, ...updates };
+              // Ensure value type consistency
+              if (updates.type) {
+                  if (updates.type === 'NUMBER') newVar.initialValue = 0;
+                  else if (updates.type === 'BOOLEAN') newVar.initialValue = false;
+                  else if (updates.type === 'STRING') newVar.initialValue = '';
+              }
+              return newVar;
+          }
+          return v;
+      });
+      onSave({ ...data, globalVariables: updatedVars });
+  };
+
+  const handleDeleteVariable = (id: string) => {
+      onSave({ ...data, globalVariables: (data.globalVariables || []).filter(v => v.id !== id) });
+  };
+
+  // --- Load Logic ---
   const executeLoadAction = async () => {
     if (confirmation.type === 'AUTOSAVE') {
         const loaded = loadAutosave();
@@ -139,12 +174,101 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
               </Button>
           </div>
           <div className="flex gap-2 mt-2 pt-2 border-t border-[#444]">
-            <Button fullWidth onClick={() => setIsSettingsOpen(true)} variant="secondary" className="text-xs"><Settings size={14} /> 설정</Button>
-            <Button fullWidth onClick={onBack} variant="ghost" icon={ArrowLeft} className="text-xs">나가기</Button>
+            <Button fullWidth onClick={() => setIsVariablesOpen(true)} variant="secondary" className="text-xs px-2"><Database size={14} /> 변수</Button>
+            <Button fullWidth onClick={() => setIsSettingsOpen(true)} variant="secondary" className="text-xs px-2"><Settings size={14} /> 설정</Button>
           </div>
+          <Button fullWidth onClick={onBack} variant="ghost" icon={ArrowLeft} className="text-xs">나가기</Button>
         </div>
       </div>
 
+      {/* Variables Modal */}
+      <Modal isOpen={isVariablesOpen} onClose={() => setIsVariablesOpen(false)} title="전역 변수 관리 (Global Variables)" maxWidth="max-w-2xl">
+          <div className="space-y-4">
+              <div className="flex justify-between items-end">
+                  <p className="text-xs text-gray-400">게임 전체에서 공유되는 변수들을 정의합니다.<br/>시나리오 분기나 상태 추적에 사용할 수 있습니다.</p>
+                  <button onClick={handleAddVariable} className="text-xs bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded text-white font-bold flex items-center gap-1">
+                      <Plus size={12}/> 변수 추가
+                  </button>
+              </div>
+
+              <div className="space-y-2 max-h-[60vh] overflow-y-auto custom-scrollbar p-1">
+                  {(data.globalVariables || []).length === 0 && (
+                      <div className="text-center py-8 text-gray-500 italic border border-dashed border-[#444] rounded">
+                          등록된 변수가 없습니다.
+                      </div>
+                  )}
+                  {(data.globalVariables || []).map((v) => (
+                      <div key={v.id} className="bg-[#1e1e1e] p-3 rounded border border-[#444] flex items-center gap-3">
+                          {/* Name */}
+                          <div className="flex-1">
+                              <label className="block text-[10px] text-gray-500 mb-1 font-bold">이름</label>
+                              <input 
+                                  type="text" 
+                                  value={v.name} 
+                                  onChange={(e) => handleUpdateVariable(v.id, { name: e.target.value })} 
+                                  className="w-full bg-[#2a2a2a] border border-[#555] rounded px-2 py-1.5 text-sm text-white font-bold"
+                                  placeholder="변수명"
+                              />
+                          </div>
+
+                          {/* Type */}
+                          <div className="w-32">
+                              <label className="block text-[10px] text-gray-500 mb-1 font-bold flex items-center gap-1"><Type size={10}/> 타입</label>
+                              <select 
+                                  value={v.type} 
+                                  onChange={(e) => handleUpdateVariable(v.id, { type: e.target.value as VariableType })} 
+                                  className="w-full bg-[#2a2a2a] border border-[#555] rounded px-2 py-1.5 text-xs text-gray-300"
+                              >
+                                  <option value="NUMBER">숫자 (Number)</option>
+                                  <option value="BOOLEAN">논리 (Bool)</option>
+                                  <option value="STRING">문자열 (String)</option>
+                              </select>
+                          </div>
+
+                          {/* Initial Value */}
+                          <div className="flex-1">
+                              <label className="block text-[10px] text-gray-500 mb-1 font-bold">초기값</label>
+                              {v.type === 'BOOLEAN' ? (
+                                  <div className="flex items-center h-[30px]">
+                                      <button 
+                                          onClick={() => handleUpdateVariable(v.id, { initialValue: !v.initialValue })}
+                                          className={`flex items-center gap-2 px-3 py-1 rounded text-xs font-bold transition-colors ${v.initialValue ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-500/50' : 'bg-red-900/50 text-red-400 border border-red-500/50'}`}
+                                      >
+                                          {v.initialValue ? <ToggleRight size={16}/> : <ToggleLeft size={16}/>}
+                                          {v.initialValue ? 'TRUE (ON)' : 'FALSE (OFF)'}
+                                      </button>
+                                  </div>
+                              ) : v.type === 'NUMBER' ? (
+                                  <input 
+                                      type="number" 
+                                      value={v.initialValue as number} 
+                                      onChange={(e) => handleUpdateVariable(v.id, { initialValue: parseFloat(e.target.value) || 0 })} 
+                                      className="w-full bg-[#2a2a2a] border border-[#555] rounded px-2 py-1.5 text-sm text-white font-mono"
+                                  />
+                              ) : (
+                                  <input 
+                                      type="text" 
+                                      value={v.initialValue as string} 
+                                      onChange={(e) => handleUpdateVariable(v.id, { initialValue: e.target.value })} 
+                                      className="w-full bg-[#2a2a2a] border border-[#555] rounded px-2 py-1.5 text-sm text-white"
+                                      placeholder="Value..."
+                                  />
+                              )}
+                          </div>
+
+                          {/* Delete */}
+                          <div className="pt-5">
+                              <button onClick={() => handleDeleteVariable(v.id)} className="text-gray-500 hover:text-red-400 p-1">
+                                  <Trash2 size={16} />
+                              </button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      </Modal>
+
+      {/* Settings Modal (Existing) */}
       <Modal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} title="시나리오 설정" maxWidth="max-w-2xl">
         <div className="space-y-6 pb-4 custom-scrollbar">
           <div className="grid grid-cols-2 gap-4">
@@ -216,6 +340,7 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = ({
         </div>
       </Modal>
 
+      {/* Load Confirmation Modal */}
       <Modal isOpen={confirmation.isOpen} onClose={() => setConfirmation({ isOpen: false, type: null, file: null })} title="데이터 불러오기" maxWidth="max-w-sm">
         <div className="text-center p-2">
            <AlertTriangle size={32} className="text-red-500 mx-auto mb-4" />

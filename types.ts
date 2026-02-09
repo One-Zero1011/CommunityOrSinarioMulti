@@ -7,6 +7,32 @@ export type ShapeType = 'RECTANGLE' | 'ROUNDED' | 'CIRCLE' | 'TRIANGLE' | 'DIAMO
 
 export type StatMethod = 'SIMPLE' | 'ADDITIVE' | 'VARIABLE_DICE' | 'DIFFICULTY' | 'THRESHOLD';
 
+// New: Variable Types
+export type VariableType = 'STRING' | 'NUMBER' | 'BOOLEAN';
+
+export interface GlobalVariable {
+  id: string;
+  name: string;
+  type: VariableType;
+  initialValue: string | number | boolean;
+}
+
+// New: Variable Logic Types
+export type ConditionOperator = 'EQUALS' | 'NOT_EQUALS' | 'GREATER_THAN' | 'LESS_THAN' | 'GREATER_EQUAL' | 'LESS_EQUAL';
+export type OperationOperator = 'SET' | 'ADD' | 'SUBTRACT' | 'TOGGLE';
+
+export interface VariableCondition {
+  variableId: string;
+  operator: ConditionOperator;
+  value: string | number | boolean;
+}
+
+export interface VariableOperation {
+  variableId: string;
+  operator: OperationOperator;
+  value?: string | number | boolean; // Optional for TOGGLE
+}
+
 export interface DiceRange {
   threshold: number; // Stat value up to this point
   dice: number;      // Dice sides (e.g. 6 for D6)
@@ -19,6 +45,9 @@ export interface OutcomeDef {
   targetMapId?: string;
   revealObjectId?: string; // ID of object to show
   hideObjectId?: string;   // ID of object to hide
+  
+  // New: Variable Operations on Outcome
+  operations?: VariableOperation[];
 }
 
 export interface ProbabilityProfile {
@@ -41,11 +70,15 @@ export interface MapObjectAction {
   // Action Type Configuration
   actionType: 'BASIC' | 'PROBABILITY';
   
+  // New: Prerequisites
+  reqConditions?: VariableCondition[];
+
   // For BASIC / Description
   text?: string; // Used as description
   targetMapId?: string;
   revealObjectId?: string;
   hideObjectId?: string;
+  operations?: VariableOperation[]; // Effects for BASIC action
 
   // For PROBABILITY
   statMethod?: StatMethod;
@@ -68,6 +101,9 @@ export interface MapObject {
   shape?: ShapeType;
   description?: string;
   
+  // New: Prerequisites for interaction
+  reqConditions?: VariableCondition[];
+
   // Investigation Logic
   useProbability?: boolean;
   isSingleUse?: boolean; // New: 1회성 상호작용 여부
@@ -79,6 +115,8 @@ export interface MapObject {
   targetMapId?: string;
   revealObjectId?: string; // For non-dice interaction
   hideObjectId?: string;   // For non-dice interaction
+  operations?: VariableOperation[]; // Effects for non-dice interaction (Basic)
+
   data?: ProbabilityProfile;
   hidden?: boolean; // Visibility control
   isSolid?: boolean; // Physical collision blocking player movement
@@ -118,6 +156,7 @@ export interface GameData {
   startMapId: string;
   adminKey?: string; 
   customStats?: CustomStatDef[]; // Definitions for custom character stats
+  globalVariables?: GlobalVariable[]; // New: Global Variables definitions
   baseHp?: number; // Base HP for character creation logic
 }
 
@@ -161,7 +200,7 @@ export type NetworkAction =
 | { type: 'SYNC_FACTION_GAMEDATA'; payload: FactionGameData } 
 | { type: 'WELCOME'; msg: string } 
 | { type: 'REQUEST_ACTION'; action: 'CLICK_OBJECT'; objectId: string } 
-| { type: 'REQUEST_SUB_ACTION'; objectId: string; subActionId: string } // New Action Type
+| { type: 'REQUEST_SUB_ACTION'; objectId: string; subActionId: string } 
 | { type: 'REQUEST_ACTION'; action: 'MOVE_MAP'; targetMapId: string } 
 | { type: 'REQUEST_ACTION'; action: 'CLOSE_MODAL' } 
 | { type: 'REQUEST_CHAR_UPDATE'; charId: string; updates: Partial<Character> } 
