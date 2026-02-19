@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { CombatGameData, CombatEntity, CombatRules, StatImpact } from '../../types';
-import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind, Download, Clipboard, Check, Sliders, ChevronUp, ChevronDown, Package } from 'lucide-react';
+import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind, Download, Clipboard, Check, Sliders, ChevronUp, ChevronDown, Package, Wrench } from 'lucide-react';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { generateId } from '../../lib/utils';
@@ -55,6 +55,14 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
     // Item Use State
     const [showItemModal, setShowItemModal] = useState(false);
     const [itemInput, setItemInput] = useState({ name: '', statId: '', value: 0 });
+
+    // Dev Tools State
+    const [showDevModal, setShowDevModal] = useState(false);
+    const [devSelectedEntityId, setDevSelectedEntityId] = useState<string | null>(null);
+
+    const handleDevUpdateStat = (entityId: string, statId: string, value: number) => {
+        setEntities(prev => prev.map(e => e.id === entityId ? { ...e, stats: { ...e.stats, [statId]: value } } : e));
+    };
 
     const openItemModal = () => {
         if (data.stats.length > 0) {
@@ -504,6 +512,13 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                 <Download size={14} />
                                 다운로드 (.txt)
                             </button>
+                            <button 
+                                onClick={() => setShowDevModal(true)}
+                                className="text-xs bg-gray-800 text-gray-400 px-3 py-1.5 rounded hover:bg-gray-700 flex items-center gap-1.5 transition-colors border border-gray-600"
+                                title="개발자 도구 (스탯 강제 수정)"
+                            >
+                                <Wrench size={14} />
+                            </button>
                             <div className="h-4 w-px bg-[#444] mx-1"></div>
                             <button onClick={() => setPhase('SETUP')} className="text-xs bg-rose-900/30 text-rose-300 px-3 py-1.5 rounded hover:bg-rose-900/50 border border-rose-800/50">설정으로 복귀</button>
                         </>
@@ -890,8 +905,9 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                             <label className="block text-xs font-bold text-gray-400 mb-1">수치 변경 (+/-)</label>
                             <input 
                                 type="number" 
+                                step="0.1"
                                 value={itemInput.value}
-                                onChange={(e) => setItemInput({...itemInput, value: parseInt(e.target.value) || 0})}
+                                onChange={(e) => setItemInput({...itemInput, value: parseFloat(e.target.value) || 0})}
                                 className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-white outline-none focus:border-indigo-500"
                             />
                         </div>
@@ -899,6 +915,65 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                     <p className="text-xs text-gray-500 italic">
                         * 아이템 사용 시 즉시 효과가 적용되고 턴이 넘어갑니다.
                     </p>
+                </div>
+            </Modal>
+            {/* Dev Tools Modal */}
+            <Modal
+                isOpen={showDevModal}
+                onClose={() => setShowDevModal(false)}
+                title="개발자 도구 (Silent Edit)"
+                maxWidth="max-w-2xl"
+                footer={<Button onClick={() => setShowDevModal(false)}>닫기</Button>}
+            >
+                <div className="flex gap-4 h-[60vh]">
+                    {/* Entity List */}
+                    <div className="w-1/3 border-r border-[#444] pr-2 overflow-y-auto space-y-1">
+                        {entities.map(ent => (
+                            <button
+                                key={ent.id}
+                                onClick={() => setDevSelectedEntityId(ent.id)}
+                                className={`w-full text-left px-3 py-2 rounded text-sm font-bold flex items-center gap-2 ${devSelectedEntityId === ent.id ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500/50' : 'hover:bg-[#333] text-gray-400'}`}
+                            >
+                                <div className={`w-2 h-2 rounded-full ${ent.team === 'A' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                                {ent.name}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Stat Editor */}
+                    <div className="flex-1 overflow-y-auto pl-2">
+                        {devSelectedEntityId ? (() => {
+                            const ent = entities.find(e => e.id === devSelectedEntityId);
+                            if (!ent) return <div className="text-gray-500 text-xs">존재하지 않는 대상</div>;
+                            
+                            return (
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center border-b border-[#444] pb-2">
+                                        <h3 className="font-bold text-lg text-white">{ent.name} 스탯 수정</h3>
+                                        <span className="text-[10px] text-gray-500 bg-black/30 px-2 py-1 rounded">로그/턴 소모 없음</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {data.stats.map(s => (
+                                            <div key={s.id}>
+                                                <label className="block text-xs font-bold text-gray-400 mb-1">{s.label}</label>
+                                                <input 
+                                                    type="number"
+                                                    step="0.1"
+                                                    value={ent.stats[s.id] || 0}
+                                                    onChange={(e) => handleDevUpdateStat(ent.id, s.id, parseFloat(e.target.value) || 0)}
+                                                    className="w-full bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono focus:border-indigo-500 outline-none"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })() : (
+                            <div className="h-full flex items-center justify-center text-gray-500 text-sm">
+                                좌측에서 대상을 선택하세요.
+                            </div>
+                        )}
+                    </div>
                 </div>
             </Modal>
         </div>

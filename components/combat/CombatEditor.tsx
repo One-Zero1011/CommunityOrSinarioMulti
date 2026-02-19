@@ -659,8 +659,9 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                         <div key={idx} className="flex items-center gap-3 bg-[#1e1e1e] p-2 rounded border border-[#444]">
                                             <input 
                                                 type="number"
+                                                step="0.1"
                                                 value={entry.value}
-                                                onChange={(e) => updateMappingEntry(idx, 'value', parseInt(e.target.value) || 0)}
+                                                onChange={(e) => updateMappingEntry(idx, 'value', parseFloat(e.target.value) || 0)}
                                                 className="w-24 bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono"
                                                 placeholder="Value"
                                             />
