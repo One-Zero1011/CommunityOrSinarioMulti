@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { CombatGameData, CombatStatDef, StatImpact, CombatRules, WeightedValue } from '../../types';
-import { ArrowLeft, Plus, Save, Trash2, Sliders, Edit2, ChevronDown, ChevronUp, Table, Zap, Target, Settings, GitCompare, ShieldAlert, Shield, Sword, Users, Skull, BarChart2, X, PieChart, Wind, ToggleRight, ToggleLeft } from 'lucide-react';
+import { ArrowLeft, Plus, Save, Trash2, Sliders, Edit2, ChevronDown, ChevronUp, Table, Zap, Target, Settings, GitCompare, ShieldAlert, Shield, Sword, Users, Skull, BarChart2, X, PieChart, Wind, ToggleRight, ToggleLeft, Upload, Check } from 'lucide-react';
 import { Button } from '../common/Button';
 import { Modal } from '../common/Modal';
 import { generateId } from '../../lib/utils';
+import { loadCombatDataFromFile } from '../../lib/file-storage';
 
 interface CombatEditorProps {
     initialData: CombatGameData;
@@ -18,6 +19,7 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
     const [showMapping, setShowMapping] = useState(false);
     const [showImpacts, setShowImpacts] = useState(false);
     const [activeTab, setActiveTab] = useState<'STATS' | 'RULES'>('STATS');
+    const fileInputRef = useRef<HTMLInputElement>(null);
     
     // Mapping Modal State
     const [editingMapping, setEditingMapping] = useState<{ statId: string, level: number, entries: WeightedValue[] } | null>(null);
@@ -161,6 +163,29 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
         document.body.removeChild(link);
     };
 
+    const handleLoadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            try {
+                const loadedData = await loadCombatDataFromFile(file);
+                setData(loadedData);
+                setSelectedStatId(null); // Reset selection
+                alert("전투 시스템 데이터를 성공적으로 불러왔습니다.");
+            } catch (err) {
+                console.error(err);
+                alert(err instanceof Error ? err.message : '파일 로드 중 오류가 발생했습니다.');
+            }
+        }
+        // Reset input value to allow loading the same file again if needed
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
+    const triggerFileInput = () => {
+        fileInputRef.current?.click();
+    };
+
     const selectedStat = data.stats.find(s => s.id === selectedStatId);
     const mappingRange = selectedStat 
         ? Array.from({ length: (selectedStat.max - selectedStat.min) + 1 }, (_, i) => selectedStat.min + i)
@@ -221,7 +246,15 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                     )}
                 </div>
 
-                <div className="p-4 border-t border-[#444] bg-[#222]">
+                <div className="p-4 border-t border-[#444] bg-[#222] space-y-2">
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleLoadFile} 
+                        accept=".json" 
+                        className="hidden" 
+                    />
+                    <Button fullWidth onClick={triggerFileInput} variant="secondary" icon={Upload}>시스템 불러오기</Button>
                     <Button fullWidth onClick={handleSaveFile} variant="primary" icon={Save}>시스템 저장 (.json)</Button>
                 </div>
             </div>
@@ -571,6 +604,17 @@ export const CombatEditor: React.FC<CombatEditorProps> = ({ initialData, onSave,
                                                 {data.stats.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                                             </select>
                                         )}
+                                    </div>
+                                    {/* Item Use Rules */}
+                                    <div className="space-y-2">
+                                        <label className="flex items-center gap-3 cursor-pointer group">
+                                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${data.rules?.itemUseConsumesTurn ? 'bg-indigo-600 border-indigo-500' : 'bg-[#222] border-[#555]'}`}>
+                                                {data.rules?.itemUseConsumesTurn && <Check size={12} className="text-white"/>}
+                                            </div>
+                                            <input type="checkbox" className="hidden" checked={data.rules?.itemUseConsumesTurn || false} onChange={(e) => handleUpdateRules({ itemUseConsumesTurn: e.target.checked })} />
+                                            <span className="text-sm font-bold text-gray-200">아이템 사용 시 턴 소모</span>
+                                        </label>
+                                        <p className="text-[10px] text-gray-500 pl-8">체크 시, 아이템을 사용하면 즉시 턴이 종료됩니다. (해제 시 추가 행동 가능)</p>
                                     </div>
                                 </div>
                             </div>

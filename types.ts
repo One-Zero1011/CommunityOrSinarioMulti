@@ -180,7 +180,7 @@ export interface CombatStatDef {
   valueMapping?: Record<number, WeightedValue[]>; 
   impacts?: StatImpact[]; 
 }
-export interface CombatRules { initiativeStatId: string; deathStatId?: string; turnOrder: 'INDIVIDUAL' | 'TEAM_SUM'; allowDodge: boolean; dodgeStatId?: string; allowDefend: boolean; defenseStatId?: string; allowCounter: boolean; counterStatId?: string; allowCover: boolean; coverStatId?: string; }
+export interface CombatRules { initiativeStatId: string; deathStatId?: string; turnOrder: 'INDIVIDUAL' | 'TEAM_SUM'; allowDodge: boolean; dodgeStatId?: string; allowDefend: boolean; defenseStatId?: string; allowCounter: boolean; counterStatId?: string; allowCover: boolean; coverStatId?: string; itemUseConsumesTurn?: boolean; }
 export interface CombatGameData { title: string; stats: CombatStatDef[]; rules?: CombatRules; }
 export interface CombatEntity { id: string; name: string; team: 'A' | 'B'; stats: Record<string, number>; hp?: number; }
 export interface CombatLogEntry { id: string; timestamp: number; text: string; type: 'ATTACK' | 'HEAL' | 'DEFEND' | 'SYSTEM' | 'FLEE'; }

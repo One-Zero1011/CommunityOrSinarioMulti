@@ -11,6 +11,18 @@ export interface RollDetails {
     isSuccess: boolean;
 }
 
+// --- Variable Logic Helpers ---
+
+const toBoolean = (val: string | number | boolean): boolean => {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') return val !== 0;
+    if (typeof val === 'string') {
+        const lower = val.toLowerCase();
+        return lower === 'true' || lower === 'on' || lower === '1' || lower === 'yes';
+    }
+    return false;
+};
+
 // --- Variable Logic ---
 
 export const checkGlobalConditions = (
@@ -22,14 +34,13 @@ export const checkGlobalConditions = (
     for (const cond of conditions) {
         const variable = variables.find(v => v.id === cond.variableId);
         if (!variable) {
-            // Variable definition missing, treat as fail or skip? Fail is safer.
             return { passed: false, reason: `Condition Check Error: Variable not found.` };
         }
 
-        const varValue = variable.initialValue; // Current value is stored in 'initialValue' field in runtime for simplicity
+        const varValue = variable.initialValue;
         const targetValue = cond.value;
 
-        // Type safety checks (basic)
+        // Type safety checks
         if (variable.type === 'NUMBER') {
             const numVar = Number(varValue);
             const numTarget = Number(targetValue);
@@ -41,17 +52,25 @@ export const checkGlobalConditions = (
                 case 'GREATER_EQUAL': if (!(numVar >= numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be >= ${numTarget}` }; break;
                 case 'LESS_EQUAL': if (!(numVar <= numTarget)) return { passed: false, reason: `${variable.name} (${numVar}) must be <= ${numTarget}` }; break;
             }
+        } else if (variable.type === 'BOOLEAN') {
+            const boolVar = toBoolean(varValue);
+            const boolTarget = toBoolean(targetValue);
+            
+            switch (cond.operator) {
+                case 'EQUALS': 
+                    if (boolVar !== boolTarget) return { passed: false, reason: `${variable.name} is ${boolVar ? 'ON' : 'OFF'}, required ${boolTarget ? 'ON' : 'OFF'}` }; 
+                    break;
+                case 'NOT_EQUALS': 
+                    if (boolVar === boolTarget) return { passed: false, reason: `${variable.name} must not be ${boolVar ? 'ON' : 'OFF'}` }; 
+                    break;
+            }
         } else {
-            // String / Boolean: Only Equals / Not Equals usually
-            // Boolean handling for strings
+            // String
             const strVar = String(varValue);
             const strTarget = String(targetValue);
             switch (cond.operator) {
                 case 'EQUALS': if (strVar !== strTarget) return { passed: false, reason: `${variable.name} condition failed.` }; break;
                 case 'NOT_EQUALS': if (strVar === strTarget) return { passed: false, reason: `${variable.name} condition failed.` }; break;
-                default: 
-                    // Other operators not supported for non-numbers, ignore or fail
-                    break;
             }
         }
     }
@@ -65,7 +84,7 @@ export const applyGlobalOperations = (
 ): GlobalVariable[] => {
     if (!operations || operations.length === 0) return variables;
 
-    // Create a deep copy to avoid mutating state directly if passed by ref
+    // Create a deep copy to avoid mutating state directly
     const newVariables = variables.map(v => ({ ...v }));
 
     operations.forEach(op => {
@@ -81,9 +100,10 @@ export const applyGlobalOperations = (
                 case 'SUBTRACT': variable.initialValue = numVal - opVal; break;
             }
         } else if (variable.type === 'BOOLEAN') {
+            const boolCurrent = toBoolean(variable.initialValue);
             switch (op.operator) {
-                case 'SET': variable.initialValue = String(op.value) === 'true'; break;
-                case 'TOGGLE': variable.initialValue = !variable.initialValue; break;
+                case 'SET': variable.initialValue = toBoolean(op.value!); break;
+                case 'TOGGLE': variable.initialValue = !boolCurrent; break;
             }
         } else {
             // String

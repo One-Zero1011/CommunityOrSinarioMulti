@@ -191,7 +191,7 @@ export const Player: React.FC<PlayerProps> = ({
           // Default to INSPECT if available, else BASIC/MOVE
           if (hasInspect) executeInteraction(obj, 'INSPECT');
           else if (hasDescription) executeInteraction(obj, 'BASIC');
-          else if (hasMove) executeInteraction(obj, 'MOVE');
+          else if (hasMove) executeInteraction(obj, 'BASIC'); // Treat move as basic to go through validation
           else executeInteraction(obj, 'BASIC'); // Fallback
       }
   };
@@ -200,27 +200,16 @@ export const Player: React.FC<PlayerProps> = ({
   const executeInteraction = (obj: MapObject, type: 'INSPECT' | 'BASIC' | 'MOVE' | 'CUSTOM', subActionId?: string) => {
       setSelectionObject(null); // Close menu if open
 
-      if (type === 'MOVE') {
-          if (obj.targetMapId) handleMoveLogic(obj.targetMapId);
-          return;
-      }
-
+      // CLIENT: Send request to host to handle logic and validation
       if (networkMode === 'CLIENT') {
           if (type === 'CUSTOM' && subActionId) {
               sendToHost({ type: 'REQUEST_SUB_ACTION', objectId: obj.id, subActionId });
           } else {
-              if (type === 'INSPECT' || (type === 'BASIC' && !obj.useProbability)) {
-                  sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
-              } else if (type === 'BASIC') {
-                  // Basic interaction check happens on client for immediate feedback if solo, but logic is on host usually.
-                  // However, for pure description viewing, simple check is ok.
-                  // But we need to check variables. Client might not have latest state if not synced perfectly?
-                  // Better to request from host to ensure consistency.
-                  sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
-              }
+              // INSPECT, BASIC, MOVE all go through here for validation on Host
+              sendToHost({ type: 'REQUEST_ACTION', action: 'CLICK_OBJECT', objectId: obj.id });
           }
       } else {
-          // HOST
+          // HOST: Execute logic directly
           handleInteractionLogic(obj, type, subActionId);
       }
   };
@@ -230,159 +219,117 @@ export const Player: React.FC<PlayerProps> = ({
     
     const applyVisibilityTriggers = (revealId?: string, hideId?: string) => { if (revealId) handleToggleVisibility(currentMapId, revealId, false); if (hideId) handleToggleVisibility(currentMapId, hideId, true); };
 
-    // Move Logic
-    if (type === 'MOVE') {
-        if (obj.targetMapId) handleMoveLogic(obj.targetMapId);
-        return;
-    }
-
     const currentState = stateRef.current;
     const globalVars = currentState.gameData.globalVariables || [];
 
-    // Custom Sub Action Logic
+    // --- A. Identify Action Definition ---
+    let actionDef: any = obj;
+    let isSubAction = false;
+
     if (type === 'CUSTOM' && subActionId) {
-        const subAction = obj.subActions?.find(a => a.id === subActionId);
-        if (subAction) {
-            // Check Requirements
-            const check = checkGlobalConditions(globalVars, subAction.reqConditions);
-            if (!check.passed) {
-                alert(`조건 불충족: ${check.reason}`);
-                return;
-            }
-
-            // Check for PROBABILITY or BASIC sub-action
-            if (subAction.actionType === 'PROBABILITY' && subAction.data) {
-                // Perform Roll Logic for Sub Action
-                if (!activeChar) { alert("탐사자를 먼저 생성해주세요."); return; }
-                
-                const tempObj = { 
-                    ...obj, // Base properties
-                    useProbability: true,
-                    statMethod: subAction.statMethod,
-                    targetStatId: subAction.targetStatId,
-                    difficultyValue: subAction.difficultyValue,
-                    successTargetValue: subAction.successTargetValue,
-                    data: subAction.data
-                };
-
-                const { result: resultType, details } = rollStatChallenge(tempObj, activeChar, gameData.customStats || []);
-                const outcome = subAction.data.outcomes[resultType];
-                
-                // Apply Effects
-                applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
-                
-                // Variable Operations (Outcome)
-                const newVars = applyGlobalOperations(globalVars, outcome.operations);
-                if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
-
-                setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
-                    ...c, 
-                    hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
-                    inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory
-                } : c));
-
-                const resultData: any = { 
-                    objectName: subAction.label, // Use sub-action label 
-                    description: `[${subAction.label}]\n(판정 결과)`, 
-                    hasRoll: true, 
-                    type: resultType, 
-                    outcome, 
-                    rollDetails: details,
-                    targetMapId: outcome.targetMapId
-                };
-                
-                if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
-                setInteractionResult(resultData);
-
-            } else {
-                // Basic Action
-                applyVisibilityTriggers(subAction.revealObjectId, subAction.hideObjectId);
-                
-                // Variable Operations (Basic)
-                const newVars = applyGlobalOperations(globalVars, subAction.operations);
-                if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
-
-                const resultData: any = { 
-                    objectName: obj.label, 
-                    description: `[${subAction.label}]\n${subAction.text || ''}`, 
-                    hasRoll: false,
-                    targetMapId: subAction.targetMapId
-                };
-                
-                if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
-                setInteractionResult(resultData);
-            }
+        const sub = obj.subActions?.find(a => a.id === subActionId);
+        if (sub) {
+            actionDef = sub;
+            isSubAction = true;
         }
+    }
+
+    // --- B. Check Conditions (Host Side Validation) ---
+    const check = checkGlobalConditions(globalVars, actionDef.reqConditions);
+    if (!check.passed) {
+        alert(`[조건 불충족] ${check.reason}`);
         return;
     }
 
-    // Main Object Requirement Check
-    const mainCheck = checkGlobalConditions(globalVars, obj.reqConditions);
-    if (!mainCheck.passed) {
-        alert(`조건 불충족: ${mainCheck.reason}`);
-        return;
-    }
+    // --- C. Logic Branch ---
 
-    // Basic Logic (Just Description)
-    if (type === 'BASIC') {
-        // Variable Operations (Basic Main Object)
-        const newVars = applyGlobalOperations(globalVars, obj.operations);
-        if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
+    // 1. PROBABILITY Logic (Roll)
+    // Applies if actionType is explicitly PROBABILITY (sub-action) OR Main object uses probability (and not basic override)
+    const isProbabilityAction = 
+        (isSubAction && actionDef.actionType === 'PROBABILITY') || 
+        (!isSubAction && obj.useProbability && type !== 'BASIC'); // Main object standard inspect
 
-        setInteractionResult({ objectName: obj.label, description: obj.description, hasRoll: false });
-        return;
-    }
-
-    // Inspect Logic (Roll) - Main Object
-    let resultData: {
-        objectName: string;
-        description?: string;
-        hasRoll: boolean;
-        type?: ResultType;
-        outcome?: OutcomeDef;
-        rollDetails?: RollDetails;
-        targetMapId?: string;
-        targetMapName?: string;
-    } = { objectName: obj.label, description: obj.description, hasRoll: false };
-
-    if (obj.useProbability && obj.data) {
+    if (isProbabilityAction) {
         if (!activeChar) { alert("탐사자를 먼저 생성해주세요."); return; }
-        const { result: resultType, details } = rollStatChallenge(obj, activeChar, gameData.customStats || []);
-        const outcome = obj.data.outcomes[resultType];
+
+        // Construct temporary object for roller if sub-action (to use standard function)
+        const rollObj = isSubAction ? {
+            ...obj,
+            useProbability: true,
+            statMethod: actionDef.statMethod,
+            targetStatId: actionDef.targetStatId,
+            difficultyValue: actionDef.difficultyValue,
+            successTargetValue: actionDef.successTargetValue,
+            data: actionDef.data
+        } : obj;
+
+        const { result: resultType, details } = rollStatChallenge(rollObj, activeChar, gameData.customStats || []);
+        const outcome = rollObj.data!.outcomes[resultType];
+
+        // Apply Effects
         applyVisibilityTriggers(outcome.revealObjectId, outcome.hideObjectId);
         
-        // Variable Operations (Outcome)
+        // Variable Operations (Outcome Level)
         const newVars = applyGlobalOperations(globalVars, outcome.operations);
         if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
 
-        // Update character state
+        // Update Character
         setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
             ...c, 
             hp: Math.min(c.maxHp, c.hp + outcome.hpChange), 
             inventory: outcome.itemDrop ? [...c.inventory, outcome.itemDrop] : c.inventory,
-            interactedObjectIds: obj.isSingleUse ? [...(c.interactedObjectIds || []), obj.id] : c.interactedObjectIds 
+            interactedObjectIds: (!isSubAction && obj.isSingleUse) ? [...(c.interactedObjectIds || []), obj.id] : c.interactedObjectIds 
         } : c));
 
-        resultData = { ...resultData, hasRoll: true, type: resultType, outcome, rollDetails: details };
-        if (outcome.targetMapId) resultData.targetMapId = outcome.targetMapId;
+        // Result Data
+        const resultData: any = { 
+            objectName: isSubAction ? actionDef.label : obj.label, 
+            description: `[${isSubAction ? actionDef.label : '조사'}]\n(판정 결과)`, 
+            hasRoll: true, 
+            type: resultType, 
+            outcome, 
+            rollDetails: details,
+            targetMapId: outcome.targetMapId
+        };
+        
+        if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
+        setInteractionResult(resultData);
+
     } else {
-        // Fallback for non-prob object treated as Inspect (shouldn't happen often)
-        applyVisibilityTriggers(obj.revealObjectId, obj.hideObjectId);
-        // Basic operations applied here if somehow reached
-        const newVars = applyGlobalOperations(globalVars, obj.operations);
+        // 2. BASIC / MOVE Logic
+        // Apply Basic Operations
+        const newVars = applyGlobalOperations(globalVars, actionDef.operations);
         if (newVars !== globalVars) syncGlobalVariables({ ...currentState.gameData, globalVariables: newVars });
 
-        if (obj.targetMapId) resultData.targetMapId = obj.targetMapId;
-        if (obj.isSingleUse) {
+        applyVisibilityTriggers(actionDef.revealObjectId, actionDef.hideObjectId);
+
+        // Character Mark as Used (Only for Main Object Single Use)
+        if (!isSubAction && obj.isSingleUse) {
              setCharacters(prev => prev.map(c => c.id === activeCharId ? { 
                 ...c, 
                 interactedObjectIds: [...(c.interactedObjectIds || []), obj.id] 
             } : c));
         }
+
+        const targetMapId = actionDef.targetMapId;
+        const description = isSubAction ? actionDef.text : obj.description;
+        const hasDescription = description && description.trim() !== "";
+
+        if (hasDescription) {
+            // Show Modal with description (and Move button if applicable)
+            const resultData: any = { 
+                objectName: isSubAction ? actionDef.label : obj.label, 
+                description: description, 
+                hasRoll: false,
+                targetMapId: targetMapId
+            };
+            if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
+            setInteractionResult(resultData);
+        } else if (targetMapId) {
+            // No Description, Just Move
+            handleMoveLogic(targetMapId);
+        }
     }
-    
-    if (resultData.targetMapId) resultData.targetMapName = stateRef.current.gameData.maps.find(m => m.id === resultData.targetMapId)?.name;
-    setInteractionResult(resultData);
   };
 
   const handleAddCharacterLogic = (character: Character) => { 

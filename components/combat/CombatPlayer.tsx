@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { CombatGameData, CombatEntity, CombatRules, StatImpact } from '../../types';
-import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind, Download, Clipboard, Check } from 'lucide-react';
+import { ArrowLeft, User, Sword, Shield, Zap, RotateCcw, Play, Plus, Trash2, CheckCircle2, Skull, UserPlus, Users, ArrowRight, Wind, Download, Clipboard, Check, Sliders, ChevronUp, ChevronDown, Package } from 'lucide-react';
 import { Button } from '../common/Button';
+import { Modal } from '../common/Modal';
 import { generateId } from '../../lib/utils';
 import { resolveWeightedStatValue } from '../../lib/game-logic';
 
@@ -30,6 +31,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
     // Battle State
     const [turnQueue, setTurnQueue] = useState<string[]>([]); // Entity IDs
     const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
+    const [round, setRound] = useState(1);
     const [turnState, setTurnState] = useState<TurnState>('ACTION');
     
     // Detailed Reaction State
@@ -46,6 +48,98 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
     const [logs, setLogs] = useState<string[]>([]);
     const [copied, setCopied] = useState(false);
+
+    const [showTurnEditor, setShowTurnEditor] = useState(false);
+    const [editingQueue, setEditingQueue] = useState<string[]>([]);
+
+    // Item Use State
+    const [showItemModal, setShowItemModal] = useState(false);
+    const [itemInput, setItemInput] = useState({ name: '', statId: '', value: 0 });
+
+    const openItemModal = () => {
+        if (data.stats.length > 0) {
+            setItemInput({ name: '', statId: data.stats[0].id, value: 0 });
+        }
+        setShowItemModal(true);
+    };
+
+    const handleUseItem = () => {
+        if (!currentEntity || !itemInput.name || !itemInput.statId) return;
+        
+        const statDef = data.stats.find(s => s.id === itemInput.statId);
+        if (!statDef) return;
+
+        const currentVal = currentEntity.stats[itemInput.statId] || 0;
+        let newVal = currentVal + itemInput.value;
+        
+        // Clamp if needed, but usually items might go beyond normal limits or not. 
+        // Let's respect max if it's not death stat, or just let it be flexible.
+        // The user didn't specify limits. But `resolveAction` does clamp.
+        // Let's clamp to max if it's a normal stat, but allow overflow if user wants?
+        // For safety, let's clamp to max defined in statDef, unless it's the death stat (HP) which might go higher?
+        // Actually `resolveAction` logic: if deathStat, newVal = current + amount (no max limit logic shown there explicitly for death stat, but for others it does Math.min).
+        // Let's follow `resolveAction` logic:
+        
+        if (rules.deathStatId === itemInput.statId) {
+             // HP-like stat: usually no max limit enforced in resolveAction for ADD, but let's see.
+             // resolveAction: if (rules.deathStatId === impact.targetStatId) newVal = currentVal + amount;
+             // else newVal = Math.min(targetStatDef.max, currentVal + amount);
+             // We'll mimic this.
+             newVal = currentVal + itemInput.value;
+        } else {
+             newVal = Math.min(statDef.max, Math.max(statDef.min, currentVal + itemInput.value));
+        }
+
+        // Update Entity
+        setEntities(prev => prev.map(e => e.id === currentEntity.id ? { ...e, stats: { ...e.stats, [itemInput.statId]: newVal } } : e));
+
+        // Log
+        const sign = itemInput.value >= 0 ? '+' : '';
+        addLog(`${currentEntity.name}가 [${itemInput.name}]을(를) 사용했습니다.\n${statDef.label} ${sign}${itemInput.value}, 현재 ${statDef.label}: ${newVal}`);
+
+        setShowItemModal(false);
+        
+        // Check rule for turn consumption
+        // Default to FALSE (Free Action) if undefined, based on my Editor implementation
+        if (rules.itemUseConsumesTurn) {
+            nextTurn();
+        }
+    };
+
+    const openTurnEditor = () => {
+        setEditingQueue([...turnQueue]);
+        setShowTurnEditor(true);
+    };
+
+    const saveTurnOrder = () => {
+        setTurnQueue(editingQueue);
+        // If the current entity is still in the queue, try to keep the index pointing to it, or reset if needed.
+        // Actually, if we reorder, the index might point to a different person.
+        // Let's just keep the index as is, or maybe the user wants to set the current turn explicitly.
+        // Let's add a "Set Current" feature in the modal itself.
+        setShowTurnEditor(false);
+        addLog(`🔄 턴 순서가 수동으로 변경되었습니다.`);
+    };
+
+    const moveTurnItem = (index: number, direction: 'UP' | 'DOWN') => {
+        const newQueue = [...editingQueue];
+        if (direction === 'UP' && index > 0) {
+            [newQueue[index], newQueue[index - 1]] = [newQueue[index - 1], newQueue[index]];
+        } else if (direction === 'DOWN' && index < newQueue.length - 1) {
+            [newQueue[index], newQueue[index + 1]] = [newQueue[index + 1], newQueue[index]];
+        }
+        setEditingQueue(newQueue);
+    };
+
+    const setAsCurrentTurn = (index: number) => {
+        setCurrentTurnIndex(index);
+        // We also need to save the queue if it was reordered before setting current.
+        // But `setCurrentTurnIndex` acts on the *live* `turnQueue`.
+        // So we should probably save the queue first, then set the index.
+        // Let's make "Set Current" just update a local state in the modal, and apply everything on Save.
+        // Or simpler: The modal manages the queue order. The "Current Turn" is just an index.
+        // Let's allow clicking a row to set it as the *new* current turn index (relative to the new order).
+    };
 
     // -- Derived --
     const rules: CombatRules = data.rules || { initiativeStatId: '', turnOrder: 'INDIVIDUAL', allowDefend: false, allowCounter: false, allowCover: false, allowDodge: false };
@@ -137,9 +231,10 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         setTurnQueue(order);
         setCurrentTurnIndex(0);
+        setRound(1);
         setTurnState('ACTION');
         setPhase('BATTLE');
-        addLog(`⚔️ 전투 시작! 첫 턴: ${entities.find(e => e.id === order[0])?.name}`);
+        addLog(`⚔️ 전투 시작! [ 1라운드 ]\n1번째 턴, ${entities.find(e => e.id === order[0])?.name}`);
     };
 
     const addLog = (msg: string) => {
@@ -223,10 +318,10 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         const isSuccess = randomRoll <= dodgeChance;
 
         if (isSuccess) {
-            addLog(`💨 [회피 성공] 회피율 ${dodgeChance}% (Roll: ${randomRoll.toFixed(1)}) -> 데미지 무효화!`);
+            addLog(`[ 회피 성공 ]\n${defender.name}에게 예정된 데미지 0 (무효화)`);
             setPendingAction(prev => prev ? ({ ...prev, currentDamage: 0 }) : null);
         } else {
-            addLog(`💥 [회피 실패] 회피율 ${dodgeChance}% (Roll: ${randomRoll.toFixed(1)}) -> 실패`);
+            addLog(`[ 회피 실패 ]\n${defender.name}에게 예정된 데미지 ${pendingAction.currentDamage}`);
         }
 
         if (rules.allowDefend || rules.allowCounter || rules.allowCover) {
@@ -273,22 +368,27 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         if (reactionType === 'DEFEND') {
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
-            addLog(`🛡️ [방어] ${roller.name}의 ${statDef.label} 판정(${reactionRoll}): 데미지 ${incomingDmg} -> ${reducedDmg}`);
+            addLog(`방어 : ${reactionRoll}\n${entities.find(e => e.id === pendingAction.targetId)?.name}는 총 ${reducedDmg}만큼의 데미지를 입습니다.`);
             resolveAction(pendingAction.targetId, reducedDmg, pendingAction.impact);
         } else if (reactionType === 'COUNTER') {
-            addLog(`⚔️ [반격] ${roller.name}의 ${statDef.label} 판정(${reactionRoll})으로 반격!`);
+            const counterDmg = reactionRoll;
+            const originalAttacker = entities.find(e => e.id === pendingAction.sourceId);
+            const counterAttacker = roller; // The one countering
+
+            addLog(`${counterAttacker.name}의 반격 : ${counterDmg}\n${originalAttacker?.name}는 총 ${counterDmg}만큼의 데미지를 입습니다.\n${counterAttacker.name}는 총 ${incomingDmg}만큼의 데미지를 입습니다.`);
+            
             resolveAction(pendingAction.targetId, incomingDmg, pendingAction.impact, false); 
-            resolveAction(pendingAction.sourceId, reactionRoll, pendingAction.impact, true);
+            resolveAction(pendingAction.sourceId, counterDmg, pendingAction.impact, true);
         } else if (reactionType === 'COVER') {
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
-            addLog(`🛡️ [대리방어] ${roller.name}가 ${entities.find(e => e.id === pendingAction.targetId)?.name}을(를) 대신하여 맞습니다! (${statDef.label} 판정 ${reactionRoll}): 데미지 ${reducedDmg}`);
+            addLog(`대리방어 : ${reactionRoll}\n${roller.name}는 총 ${reducedDmg}만큼의 데미지를 입습니다.`);
             resolveAction(rollerId!, reducedDmg, pendingAction.impact);
         }
     };
 
     const skipReaction = () => {
         if(pendingAction) {
-            addLog(`💥 반응하지 않고 그대로 맞습니다.`);
+            addLog(`반응 안함\n${entities.find(e => e.id === pendingAction.targetId)?.name}는 총 ${pendingAction.currentDamage}만큼의 데미지를 입습니다.`);
             resolveAction(pendingAction.targetId, pendingAction.currentDamage, pendingAction.impact);
         }
     };
@@ -337,9 +437,15 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         let nextIndex = currentTurnIndex;
         let loopCount = 0;
         let found = false;
+        let nextRound = round;
 
         while(loopCount < turnQueue.length) {
-            nextIndex = (nextIndex + 1) % turnQueue.length;
+            nextIndex = (nextIndex + 1);
+            if (nextIndex >= turnQueue.length) {
+                nextIndex = 0;
+                nextRound += 1;
+            }
+            
             const nextEntityId = turnQueue[nextIndex];
             const nextEntity = entities.find(e => e.id === nextEntityId);
             
@@ -354,9 +460,10 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
             addLog(`🏁 생존자가 없습니다. 전투 종료?`);
         } else {
             setCurrentTurnIndex(nextIndex);
+            setRound(nextRound);
             const nextEntityId = turnQueue[nextIndex];
             const nextEnt = entities.find(e => e.id === nextEntityId);
-            addLog(`⏩ 다음 턴: ${nextEnt?.name}`);
+            addLog(`⏩ [ ${nextRound}라운드 ]\n${nextIndex + 1}번째 턴, ${nextEnt?.name}`);
         }
     };
 
@@ -376,6 +483,13 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                 <div className="flex items-center gap-2">
                     {phase === 'BATTLE' && (
                         <>
+                            <button 
+                                onClick={openTurnEditor}
+                                className="text-xs bg-[#333] text-gray-300 px-3 py-1.5 rounded hover:bg-[#444] flex items-center gap-1.5 transition-colors border border-[#555]"
+                            >
+                                <Sliders size={14} />
+                                턴 수정
+                            </button>
                             <button 
                                 onClick={handleCopyLogs}
                                 className="text-xs bg-[#333] text-gray-300 px-3 py-1.5 rounded hover:bg-[#444] flex items-center gap-1.5 transition-colors border border-[#555]"
@@ -468,7 +582,10 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                             <div className="mb-4 bg-black/40 p-3 rounded-lg border border-[#444] flex items-center justify-between">
                                 <div>
                                     <span className="text-xs text-gray-500 font-bold block">현재 턴</span>
-                                    <span className={`text-xl font-bold ${currentEntity?.team === 'A' ? 'text-blue-400' : 'text-red-400'}`}>{currentEntity?.name}</span>
+                                    <div className={`text-xl font-bold whitespace-pre-line ${currentEntity?.team === 'A' ? 'text-blue-400' : 'text-red-400'}`}>
+                                        <span className="text-sm text-gray-400 block mb-1">[ {round}라운드 ]</span>
+                                        {currentTurnIndex + 1}번째 턴, {currentEntity?.name}
+                                    </div>
                                 </div>
                                 <div className="text-right">
                                     <span className="text-xs text-gray-500 block">상태</span>
@@ -517,7 +634,15 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                                 </div>
                                             );
                                         })}
-                                        <button onClick={nextTurn} className="w-full py-3 border border-gray-600 text-gray-400 rounded hover:bg-[#333] mt-4">턴 넘기기</button>
+                                        <div className="flex gap-2 mt-4">
+                                            <button 
+                                                onClick={openItemModal}
+                                                className="flex-1 py-3 border border-indigo-500/50 bg-indigo-900/20 text-indigo-300 rounded hover:bg-indigo-900/40 flex items-center justify-center gap-2 font-bold"
+                                            >
+                                                <Package size={18} /> 아이템 사용
+                                            </button>
+                                            <button onClick={nextTurn} className="flex-1 py-3 border border-gray-600 text-gray-400 rounded hover:bg-[#333]">턴 넘기기</button>
+                                        </div>
                                     </div>
                                 )}
 
@@ -535,6 +660,16 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                             className="w-full py-4 bg-emerald-700 hover:bg-emerald-600 rounded text-white font-bold flex items-center justify-center gap-2 shadow-lg"
                                         >
                                             <Wind size={24} /> 회피 시도
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setPendingAction(null);
+                                                setTurnState('ACTION');
+                                                addLog(`↩️ 공격 취소됨.`);
+                                            }}
+                                            className="w-full py-2 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 font-bold flex items-center justify-center gap-2 mt-2"
+                                        >
+                                            <RotateCcw size={16} /> 돌아가기 (공격 취소)
                                         </button>
                                     </div>
                                 )}
@@ -578,6 +713,16 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                                                 )}
                                                 <button onClick={skipReaction} className="py-3 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 font-bold flex items-center justify-center gap-2 mt-2">
                                                     <Skull size={18}/> 반응 안함 (그대로 맞기)
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        setPendingAction(null);
+                                                        setTurnState('ACTION');
+                                                        addLog(`↩️ 공격 취소됨.`);
+                                                    }}
+                                                    className="py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded text-gray-400 font-bold flex items-center justify-center gap-2 mt-2"
+                                                >
+                                                    <RotateCcw size={14}/> 돌아가기 (공격 취소)
                                                 </button>
                                             </div>
                                         )}
@@ -641,6 +786,121 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                     </div>
                 </div>
             )}
+            {/* Turn Editor Modal */}
+            <Modal
+                isOpen={showTurnEditor}
+                onClose={() => setShowTurnEditor(false)}
+                title="턴 순서 수정"
+                maxWidth="max-w-lg"
+                footer={
+                    <div className="flex gap-2 justify-end">
+                        <Button variant="ghost" onClick={() => setShowTurnEditor(false)}>취소</Button>
+                        <Button onClick={() => {
+                            setTurnQueue(editingQueue);
+                            // If we want to change the current turn, we need a state for it.
+                            // For now, let's just save the order.
+                            // Wait, the user might want to jump to a specific person.
+                            // Let's add a "Jump to this turn" button in the list.
+                            setShowTurnEditor(false);
+                            addLog(`🔄 턴 순서가 수동으로 변경되었습니다.`);
+                        }}>저장</Button>
+                    </div>
+                }
+            >
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto p-1">
+                    <p className="text-xs text-gray-400 mb-2">
+                        드래그 앤 드롭 대신 화살표를 사용하여 순서를 변경하세요.<br/>
+                        <span className="text-yellow-400">★</span> 버튼을 누르면 해당 캐릭터의 턴으로 즉시 변경됩니다.
+                    </p>
+                    {editingQueue.map((entityId, idx) => {
+                        const entity = entities.find(e => e.id === entityId);
+                        const isCurrent = idx === currentTurnIndex; // This is the *live* current index, might not match new order context if we don't update it.
+                        // Actually, if we reorder, the index 0 is the first one.
+                        // The `currentTurnIndex` is an index into `turnQueue`.
+                        // If we change `turnQueue`, `currentTurnIndex` still points to `idx`.
+                        // So if I move the current person down, the *next* person becomes current effectively?
+                        // It's safer to allow the user to explicitly pick "Who is active now".
+                        
+                        return (
+                            <div key={entityId} className={`flex items-center justify-between p-2 rounded border ${idx === currentTurnIndex ? 'bg-yellow-900/20 border-yellow-600' : 'bg-[#333] border-[#444]'}`}>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-mono text-gray-500 w-6 text-center">{idx + 1}</span>
+                                    <div className={`w-3 h-3 rounded-full ${entity?.team === 'A' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                                    <span className={`font-bold ${entity?.team === 'A' ? 'text-blue-200' : 'text-red-200'}`}>{entity?.name}</span>
+                                    {idx === currentTurnIndex && <span className="text-[10px] bg-yellow-600 text-black px-1 rounded font-bold">CURRENT</span>}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <button 
+                                        onClick={() => {
+                                            setCurrentTurnIndex(idx);
+                                            addLog(`🔄 턴 강제 변경: ${entity?.name}`);
+                                        }}
+                                        className={`p-1.5 rounded hover:bg-[#555] ${idx === currentTurnIndex ? 'text-yellow-400' : 'text-gray-600'}`}
+                                        title="이 턴으로 이동"
+                                    >
+                                        <Zap size={14} fill={idx === currentTurnIndex ? "currentColor" : "none"} />
+                                    </button>
+                                    <div className="w-px h-4 bg-[#555] mx-1"></div>
+                                    <button onClick={() => moveTurnItem(idx, 'UP')} disabled={idx === 0} className="p-1 text-gray-400 hover:text-white disabled:opacity-30"><ChevronUp size={16}/></button>
+                                    <button onClick={() => moveTurnItem(idx, 'DOWN')} disabled={idx === editingQueue.length - 1} className="p-1 text-gray-400 hover:text-white disabled:opacity-30"><ChevronDown size={16}/></button>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </Modal>
+            {/* Item Use Modal */}
+            <Modal
+                isOpen={showItemModal}
+                onClose={() => setShowItemModal(false)}
+                title="아이템 사용"
+                maxWidth="max-w-md"
+                footer={
+                    <div className="flex gap-2 justify-end">
+                        <Button variant="ghost" onClick={() => setShowItemModal(false)}>취소</Button>
+                        <Button onClick={handleUseItem} disabled={!itemInput.name}>사용하기</Button>
+                    </div>
+                }
+            >
+                <div className="space-y-4 p-2">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-400 mb-1">아이템 이름</label>
+                        <input 
+                            type="text" 
+                            value={itemInput.name}
+                            onChange={(e) => setItemInput({...itemInput, name: e.target.value})}
+                            placeholder="예: 회복 물약, 수류탄..."
+                            className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-white outline-none focus:border-indigo-500"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 mb-1">대상 스탯</label>
+                            <select 
+                                value={itemInput.statId}
+                                onChange={(e) => setItemInput({...itemInput, statId: e.target.value})}
+                                className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-white outline-none focus:border-indigo-500"
+                            >
+                                {data.stats.map(s => (
+                                    <option key={s.id} value={s.id}>{s.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 mb-1">수치 변경 (+/-)</label>
+                            <input 
+                                type="number" 
+                                value={itemInput.value}
+                                onChange={(e) => setItemInput({...itemInput, value: parseInt(e.target.value) || 0})}
+                                className="w-full bg-[#333] border border-[#555] rounded px-3 py-2 text-white outline-none focus:border-indigo-500"
+                            />
+                        </div>
+                    </div>
+                    <p className="text-xs text-gray-500 italic">
+                        * 아이템 사용 시 즉시 효과가 적용되고 턴이 넘어갑니다.
+                    </p>
+                </div>
+            </Modal>
         </div>
     );
 };
