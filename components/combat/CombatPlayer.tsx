@@ -58,7 +58,31 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
     // Dev Tools State
     const [showDevModal, setShowDevModal] = useState(false);
+    const [devTab, setDevTab] = useState<'EDITOR' | 'STATS'>('EDITOR');
     const [devSelectedEntityId, setDevSelectedEntityId] = useState<string | null>(null);
+
+    // Combat Statistics
+    interface CombatStats {
+        damageDealt: number;
+        damageTaken: number;
+        damageMitigated: number;
+        healingDone: number;
+        healingReceived: number;
+    }
+    const [combatStats, setCombatStats] = useState<Record<string, CombatStats>>({});
+
+    const updateCombatStats = (entityId: string, type: keyof CombatStats, value: number) => {
+        setCombatStats(prev => {
+            const current = prev[entityId] || { damageDealt: 0, damageTaken: 0, damageMitigated: 0, healingDone: 0, healingReceived: 0 };
+            return {
+                ...prev,
+                [entityId]: {
+                    ...current,
+                    [type]: current[type] + value
+                }
+            };
+        });
+    };
 
     const handleDevUpdateStat = (entityId: string, statId: string, value: number) => {
         setEntities(prev => prev.map(e => e.id === entityId ? { ...e, stats: { ...e.stats, [statId]: value } } : e));
@@ -104,6 +128,12 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         // Log
         const sign = itemInput.value >= 0 ? '+' : '';
         addLog(`${currentEntity.name}가 [${itemInput.name}]을(를) 사용했습니다.\n${statDef.label} ${sign}${itemInput.value}, 현재 ${statDef.label}: ${newVal}`);
+
+        // Stats Tracking (Healing)
+        if (itemInput.value > 0) {
+            updateCombatStats(currentEntity.id, 'healingDone', itemInput.value);
+            updateCombatStats(currentEntity.id, 'healingReceived', itemInput.value);
+        }
 
         setShowItemModal(false);
         
@@ -300,10 +330,10 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                 setTurnState('REACTION');
                 addLog(`${currentEntity.name} 공격(위력:${roll})! -> 대응 선택 대기`);
             } else {
-                resolveAction(targetId, roll, impact);
+                resolveAction(targetId, roll, impact, true, currentEntity.id);
             }
         } else {
-            resolveAction(targetId, roll, impact);
+            resolveAction(targetId, roll, impact, true, currentEntity.id);
         }
     };
 
@@ -327,6 +357,7 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
         if (isSuccess) {
             addLog(`[ 회피 성공 ]\n${defender.name}에게 예정된 데미지 0 (무효화)`);
+            updateCombatStats(defender.id, 'damageMitigated', pendingAction.currentDamage);
             setPendingAction(prev => prev ? ({ ...prev, currentDamage: 0 }) : null);
         } else {
             addLog(`[ 회피 실패 ]\n${defender.name}에게 예정된 데미지 ${pendingAction.currentDamage}`);
@@ -377,7 +408,9 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
         if (reactionType === 'DEFEND') {
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
             addLog(`방어 : ${reactionRoll}\n${entities.find(e => e.id === pendingAction.targetId)?.name}는 총 ${reducedDmg}만큼의 데미지를 입습니다.`);
-            resolveAction(pendingAction.targetId, reducedDmg, pendingAction.impact);
+            
+            updateCombatStats(roller.id, 'damageMitigated', Math.min(incomingDmg, reactionRoll));
+            resolveAction(pendingAction.targetId, reducedDmg, pendingAction.impact, true, pendingAction.sourceId);
         } else if (reactionType === 'COUNTER') {
             const counterDmg = reactionRoll;
             const originalAttacker = entities.find(e => e.id === pendingAction.sourceId);
@@ -385,23 +418,25 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
 
             addLog(`${counterAttacker.name}의 반격 : ${counterDmg}\n${originalAttacker?.name}는 총 ${counterDmg}만큼의 데미지를 입습니다.\n${counterAttacker.name}는 총 ${incomingDmg}만큼의 데미지를 입습니다.`);
             
-            resolveAction(pendingAction.targetId, incomingDmg, pendingAction.impact, false); 
-            resolveAction(pendingAction.sourceId, counterDmg, pendingAction.impact, true);
+            resolveAction(pendingAction.targetId, incomingDmg, pendingAction.impact, false, pendingAction.sourceId); 
+            resolveAction(pendingAction.sourceId, counterDmg, pendingAction.impact, true, counterAttacker.id);
         } else if (reactionType === 'COVER') {
             const reducedDmg = Math.max(0, incomingDmg - reactionRoll);
             addLog(`대리방어 : ${reactionRoll}\n${roller.name}는 총 ${reducedDmg}만큼의 데미지를 입습니다.`);
-            resolveAction(rollerId!, reducedDmg, pendingAction.impact);
+            
+            updateCombatStats(roller.id, 'damageMitigated', Math.min(incomingDmg, reactionRoll));
+            resolveAction(rollerId!, reducedDmg, pendingAction.impact, true, pendingAction.sourceId);
         }
     };
 
     const skipReaction = () => {
         if(pendingAction) {
             addLog(`반응 안함\n${entities.find(e => e.id === pendingAction.targetId)?.name}는 총 ${pendingAction.currentDamage}만큼의 데미지를 입습니다.`);
-            resolveAction(pendingAction.targetId, pendingAction.currentDamage, pendingAction.impact);
+            resolveAction(pendingAction.targetId, pendingAction.currentDamage, pendingAction.impact, true, pendingAction.sourceId);
         }
     };
 
-    const resolveAction = (targetId: string, amount: number, impact?: StatImpact, isTurnEnd = true) => {
+    const resolveAction = (targetId: string, amount: number, impact?: StatImpact, isTurnEnd = true, sourceId?: string) => {
         if (impact) {
             const targetEntity = entities.find(e => e.id === targetId);
             const targetStatDef = data.stats.find(s => s.id === impact.targetStatId);
@@ -415,6 +450,12 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
                     newVal = Math.max(minLimit, currentVal - amount);
                     addLog(`🩸 ${targetEntity.name}의 ${targetStatDef.label} -${amount} (${currentVal} -> ${newVal})`);
                     
+                    // Stats Tracking
+                    updateCombatStats(targetId, 'damageTaken', amount);
+                    if (sourceId) {
+                        updateCombatStats(sourceId, 'damageDealt', amount);
+                    }
+
                     if (rules.deathStatId === impact.targetStatId && newVal <= 0) {
                         addLog(`💀 [사망] ${targetEntity.name}이(가) 쓰러졌습니다!`);
                     }
@@ -921,60 +962,138 @@ export const CombatPlayer: React.FC<CombatPlayerProps> = ({ data, onExit }) => {
             <Modal
                 isOpen={showDevModal}
                 onClose={() => setShowDevModal(false)}
-                title="개발자 도구 (Silent Edit)"
-                maxWidth="max-w-2xl"
+                title="개발자 도구"
+                maxWidth="max-w-4xl"
                 footer={<Button onClick={() => setShowDevModal(false)}>닫기</Button>}
             >
-                <div className="flex gap-4 h-[60vh]">
-                    {/* Entity List */}
-                    <div className="w-1/3 border-r border-[#444] pr-2 overflow-y-auto space-y-1">
-                        {entities.map(ent => (
-                            <button
-                                key={ent.id}
-                                onClick={() => setDevSelectedEntityId(ent.id)}
-                                className={`w-full text-left px-3 py-2 rounded text-sm font-bold flex items-center gap-2 ${devSelectedEntityId === ent.id ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500/50' : 'hover:bg-[#333] text-gray-400'}`}
-                            >
-                                <div className={`w-2 h-2 rounded-full ${ent.team === 'A' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
-                                {ent.name}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Stat Editor */}
-                    <div className="flex-1 overflow-y-auto pl-2">
-                        {devSelectedEntityId ? (() => {
-                            const ent = entities.find(e => e.id === devSelectedEntityId);
-                            if (!ent) return <div className="text-gray-500 text-xs">존재하지 않는 대상</div>;
-                            
-                            return (
-                                <div className="space-y-4">
-                                    <div className="flex justify-between items-center border-b border-[#444] pb-2">
-                                        <h3 className="font-bold text-lg text-white">{ent.name} 스탯 수정</h3>
-                                        <span className="text-[10px] text-gray-500 bg-black/30 px-2 py-1 rounded">로그/턴 소모 없음</span>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {data.stats.map(s => (
-                                            <div key={s.id}>
-                                                <label className="block text-xs font-bold text-gray-400 mb-1">{s.label}</label>
-                                                <input 
-                                                    type="number"
-                                                    step="0.1"
-                                                    value={ent.stats[s.id] || 0}
-                                                    onChange={(e) => handleDevUpdateStat(ent.id, s.id, parseFloat(e.target.value) || 0)}
-                                                    className="w-full bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono focus:border-indigo-500 outline-none"
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            );
-                        })() : (
-                            <div className="h-full flex items-center justify-center text-gray-500 text-sm">
-                                좌측에서 대상을 선택하세요.
-                            </div>
-                        )}
-                    </div>
+                <div className="flex border-b border-[#444] mb-4">
+                    <button onClick={() => setDevTab('EDITOR')} className={`px-4 py-2 font-bold ${devTab === 'EDITOR' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-500'}`}>스탯 수정</button>
+                    <button onClick={() => setDevTab('STATS')} className={`px-4 py-2 font-bold ${devTab === 'STATS' ? 'text-white border-b-2 border-indigo-500' : 'text-gray-500'}`}>전투 통계</button>
                 </div>
+
+                {devTab === 'EDITOR' ? (
+                    <div className="flex gap-4 h-[60vh]">
+                        {/* Entity List */}
+                        <div className="w-1/3 border-r border-[#444] pr-2 overflow-y-auto space-y-1">
+                            {entities.map(ent => (
+                                <button
+                                    key={ent.id}
+                                    onClick={() => setDevSelectedEntityId(ent.id)}
+                                    className={`w-full text-left px-3 py-2 rounded text-sm font-bold flex items-center gap-2 ${devSelectedEntityId === ent.id ? 'bg-indigo-900/50 text-indigo-300 border border-indigo-500/50' : 'hover:bg-[#333] text-gray-400'}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full ${ent.team === 'A' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                                    {ent.name}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Stat Editor */}
+                        <div className="flex-1 overflow-y-auto pl-2">
+                            {devSelectedEntityId ? (() => {
+                                const ent = entities.find(e => e.id === devSelectedEntityId);
+                                if (!ent) return <div className="text-gray-500 text-xs">존재하지 않는 대상</div>;
+                                
+                                return (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center border-b border-[#444] pb-2">
+                                            <h3 className="font-bold text-lg text-white">{ent.name} 스탯 수정</h3>
+                                            <span className="text-[10px] text-gray-500 bg-black/30 px-2 py-1 rounded">로그/턴 소모 없음</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            {data.stats.map(s => (
+                                                <div key={s.id}>
+                                                    <label className="block text-xs font-bold text-gray-400 mb-1">{s.label}</label>
+                                                    <input 
+                                                        type="number"
+                                                        step="0.1"
+                                                        value={ent.stats[s.id] || 0}
+                                                        onChange={(e) => handleDevUpdateStat(ent.id, s.id, parseFloat(e.target.value) || 0)}
+                                                        className="w-full bg-[#333] border border-[#555] rounded px-2 py-1 text-white font-mono focus:border-indigo-500 outline-none"
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })() : (
+                                <div className="h-full flex items-center justify-center text-gray-500 text-sm">
+                                    좌측에서 대상을 선택하세요.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ) : (
+                    // STATS TAB
+                    <div className="h-[60vh] overflow-y-auto">
+                        <table className="w-full text-sm text-left text-gray-300">
+                            <thead className="text-xs text-gray-500 uppercase bg-[#222] sticky top-0">
+                                <tr>
+                                    <th className="px-4 py-3">이름</th>
+                                    <th className="px-4 py-3 text-right text-red-400">딜량 (Dealt)</th>
+                                    <th className="px-4 py-3 text-right text-orange-400">피해량 (Taken)</th>
+                                    <th className="px-4 py-3 text-right text-blue-400">방어/회피 (Mitigated)</th>
+                                    <th className="px-4 py-3 text-right text-green-400">회복량 (Heal)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#444]">
+                                {entities.map(ent => {
+                                    const stats = combatStats[ent.id] || { damageDealt: 0, damageTaken: 0, damageMitigated: 0, healingDone: 0, healingReceived: 0 };
+                                    return (
+                                        <tr key={ent.id} className="hover:bg-[#333]">
+                                            <td className="px-4 py-3 font-bold flex items-center gap-2">
+                                                <div className={`w-2 h-2 rounded-full ${ent.team === 'A' ? 'bg-blue-500' : 'bg-red-500'}`}></div>
+                                                {ent.name}
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono">{stats.damageDealt.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{stats.damageTaken.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{stats.damageMitigated.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{stats.healingDone.toFixed(1)}</td>
+                                        </tr>
+                                    );
+                                })}
+                                {/* Team Summaries */}
+                                {['A', 'B'].map(team => {
+                                    const teamEntities = entities.filter(e => e.team === team);
+                                    const teamStats = teamEntities.reduce((acc, ent) => {
+                                        const s = combatStats[ent.id] || { damageDealt: 0, damageTaken: 0, damageMitigated: 0, healingDone: 0 };
+                                        return {
+                                            damageDealt: acc.damageDealt + s.damageDealt,
+                                            damageTaken: acc.damageTaken + s.damageTaken,
+                                            damageMitigated: acc.damageMitigated + s.damageMitigated,
+                                            healingDone: acc.healingDone + s.healingDone
+                                        };
+                                    }, { damageDealt: 0, damageTaken: 0, damageMitigated: 0, healingDone: 0 });
+                                    
+                                    return (
+                                        <tr key={`team-${team}`} className={`bg-${team === 'A' ? 'blue' : 'red'}-900/20 font-bold border-t-2 border-[#555]`}>
+                                            <td className="px-4 py-3 text-white">{team}팀 합계</td>
+                                            <td className="px-4 py-3 text-right font-mono text-red-300">{teamStats.damageDealt.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-orange-300">{teamStats.damageTaken.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-blue-300">{teamStats.damageMitigated.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono text-green-300">{teamStats.healingDone.toFixed(1)}</td>
+                                        </tr>
+                                    );
+                                })}
+                                {/* Total */}
+                                <tr className="bg-[#111] font-bold border-t-2 border-white/20">
+                                    <td className="px-4 py-3 text-yellow-400">전체 총합</td>
+                                    <td className="px-4 py-3 text-right font-mono text-yellow-400">
+                                        {Object.values(combatStats).reduce((sum, s) => sum + s.damageDealt, 0).toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono text-yellow-400">
+                                        {Object.values(combatStats).reduce((sum, s) => sum + s.damageTaken, 0).toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono text-yellow-400">
+                                        {Object.values(combatStats).reduce((sum, s) => sum + s.damageMitigated, 0).toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-mono text-yellow-400">
+                                        {Object.values(combatStats).reduce((sum, s) => sum + s.healingDone, 0).toFixed(1)}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </Modal>
         </div>
     );
