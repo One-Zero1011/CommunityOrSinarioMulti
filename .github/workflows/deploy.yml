@@ -30,13 +30,7 @@ jobs:
           # cache: 'npm' 옵션을 제거하여 lock 파일 누락 시 에러 방지
 
       - name: Install dependencies
-        # package-lock.json이 있으면 npm ci (빠름/안전), 없으면 npm install 사용
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: npm install
 
       - name: Build
         run: npm run build
