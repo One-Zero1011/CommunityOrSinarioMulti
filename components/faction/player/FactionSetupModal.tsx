@@ -98,9 +98,9 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
                 
                 <div className="flex-1 overflow-hidden flex">
                     {setupTab === 'PLAYER' && (
-                        <div className="flex-1 flex flex-col md:flex-row h-full">
+                        <div className="flex-1 flex flex-col md:flex-row h-full overflow-y-auto md:overflow-hidden">
                             {/* Left: Faction & Team Selection */}
-                            <div className="w-full md:w-1/3 border-r border-[#444] p-4 flex flex-col bg-[#1e1e1e] overflow-y-auto">
+                            <div className="w-full md:w-1/3 border-r border-[#444] p-4 flex flex-col bg-[#1e1e1e] md:overflow-y-auto shrink-0">
                                 <h3 className="text-sm font-bold text-gray-400 uppercase mb-3 flex items-center gap-2">
                                     <Shield size={16}/> 1. 진영 선택
                                 </h3>
@@ -143,7 +143,7 @@ export const FactionSetupModal: React.FC<FactionSetupModalProps> = ({ data, onCl
                             </div>
 
                             {/* Right: Character Stats */}
-                            <div className="flex-1 p-6 overflow-y-auto bg-[#252525]">
+                            <div className="flex-1 p-6 md:overflow-y-auto bg-[#252525]">
                                 <div className={`transition-opacity duration-300 ${(!setupFactionId || !setupTeamId) ? 'opacity-30 pointer-events-none' : 'opacity-100'}`}>
                                     <h3 className="text-sm font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
                                         <User size={16}/> 3. 캐릭터 설정
