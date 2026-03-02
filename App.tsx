@@ -1,21 +1,21 @@
 
 import React, { useState } from 'react';
-import { Editor } from './components/editor/Editor';
-import { Player } from './components/player/Player';
-import { MobilePlayer } from './components/mobile/MobilePlayer';
-import { MobileEditor } from './components/mobile/MobileEditor';
-import { FactionEditor } from './components/faction/FactionEditor';
-import { FactionPlayer } from './components/faction/FactionPlayer';
-import { MobileFactionPlayer } from './components/mobile/MobileFactionPlayer';
-import { CombatEditor } from './components/combat/CombatEditor';
-import { CombatPlayer } from './components/combat/CombatPlayer';
-import { Home } from './components/Home';
-import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA, INITIAL_COMBAT_DATA } from './lib/constants';
+import { Editor } from './components/editor/Editor.tsx';
+import { Player } from './components/player/Player.tsx';
+import { MobilePlayer } from './components/mobile/MobilePlayer.tsx';
+import { MobileEditor } from './components/mobile/MobileEditor.tsx';
+import { FactionEditor } from './components/faction/FactionEditor.tsx';
+import { FactionPlayer } from './components/faction/FactionPlayer.tsx';
+import { MobileFactionPlayer } from './components/mobile/MobileFactionPlayer.tsx';
+import { CombatEditor } from './components/combat/CombatEditor.tsx';
+import { CombatPlayer } from './components/combat/CombatPlayer.tsx';
+import { Home } from './components/Home.tsx';
+import { INITIAL_GAME_DATA, INITIAL_FACTION_DATA, INITIAL_COMBAT_DATA } from './lib/constants.ts';
 import { GameData, FactionGameData, CombatGameData } from './types';
-import { loadGameDataFromFile, loadFactionDataFromFile, loadCombatDataFromFile } from './lib/file-storage';
-import { useNetwork } from './hooks/useNetwork';
-import { useIsMobile } from './hooks/useIsMobile';
-import { getFactionSession, clearFactionSession, saveFactionSession } from './lib/session-storage';
+import { loadGameDataFromFile, loadFactionDataFromFile, loadCombatDataFromFile } from './lib/file-storage.ts';
+import { useNetwork } from './hooks/useNetwork.ts';
+import { useIsMobile } from './hooks/useIsMobile.ts';
+import { getFactionSession, clearFactionSession, saveFactionSession } from './lib/session-storage.ts';
 
 type AppMode = 'HOME' | 'EDITOR' | 'PLAYER' | 'FACTION_EDITOR' | 'FACTION_PLAYER' | 'COMBAT_EDITOR' | 'COMBAT_PLAYER';
 

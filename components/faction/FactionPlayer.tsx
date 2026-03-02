@@ -17,6 +17,7 @@ import { Button } from '../common/Button';
 import { useFactionData } from './hooks/useFactionData';
 import { useCombatSystem } from './hooks/useCombatSystem';
 import { useFactionNetwork } from './hooks/useFactionNetwork';
+import { getFactionSession } from '../../lib/session-storage';
 
 interface FactionPlayerProps {
   data: FactionGameData;
@@ -40,12 +41,12 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
       currentMap, 
       handlePlayerJoin, handleAdminLogin, handleMapChange, 
       updateAdminPlayer, sendAdminAnnouncement, handleSendMessage, handleBlockClick, 
-      broadcastProfileUpdate, updateMapData, advanceGlobalMapTurn
+      broadcastProfileUpdate, updateMapData, advanceGlobalMapTurn, handleDeletePlayer
   } = useFactionData({ initialData, network, networkMode });
 
   // UI Local State
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
-  const [isSetupOpen, setIsSetupOpen] = useState(true);
+  const [isSetupOpen, setIsSetupOpen] = useState(!getFactionSession()?.myProfile && !getFactionSession()?.isAdmin);
   const selectedAdminPlayer = players.find(p => p.id === selectedPlayerId);
 
   // 2. Combat System Hook
@@ -53,7 +54,8 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
       combatState, setCombatState,
       setAdminCombatViewOpen,
       activeSession, isCombatActiveInRelevantBlock, showCombatUI,
-      toggleCombat, handleCombatAction, handleCombatResponse, resolveTurn, resumeCombatsOnGlobalTurn
+      toggleCombat, handleCombatAction, handleCombatResponse, resolveTurn, resumeCombatsOnGlobalTurn,
+      handleDeleteCharacterFromCombat
   } = useCombatSystem({
       network, players, myProfile, isAdmin, selectedAdminPlayer,
       broadcastProfileUpdate, updateMapData, data, currentMap
@@ -74,6 +76,12 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
   const handleGlobalTurnAdvance = () => {
       advanceGlobalMapTurn();
       resumeCombatsOnGlobalTurn();
+  };
+
+  const handleDeleteCharacter = (targetId: string) => {
+      if (!isAdmin) return;
+      handleDeleteCharacterFromCombat(targetId);
+      handleDeletePlayer(targetId);
   };
 
   const isTurnFinished = myProfile && myProfile.lastActionTurn === data.currentTurn;
@@ -130,6 +138,7 @@ export const FactionPlayer: React.FC<FactionPlayerProps> = ({ data: initialData,
                 chatMessages={chatMessages}
                 onSendMessage={handleSendMessage}
                 isAdmin={isAdmin}
+                onDeleteCharacter={handleDeleteCharacter}
                 onClose={() => setAdminCombatViewOpen(false)}
             />
         )}

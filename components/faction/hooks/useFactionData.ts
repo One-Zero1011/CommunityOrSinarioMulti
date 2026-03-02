@@ -1,8 +1,9 @@
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { FactionGameData, FactionPlayerProfile, FactionMap, FactionChatMessage, GlobalCombatState } from '../../../types';
 import { generateId } from '../../../lib/utils';
 import { useNetwork } from '../../../hooks/useNetwork';
+import { saveFactionSession, getFactionSession } from '../../../lib/session-storage';
 
 interface UseFactionDataProps {
     initialData: FactionGameData;
@@ -13,17 +14,30 @@ interface UseFactionDataProps {
 export const useFactionData = ({ initialData, network, networkMode }: UseFactionDataProps) => {
     const { broadcast, sendToHost } = network;
 
+    const session = getFactionSession();
+
     const [data, setData] = useState<FactionGameData>({
         ...initialData,
         currentTurn: initialData.currentTurn || 1
     });
     const [players, setPlayers] = useState<FactionPlayerProfile[]>([]);
-    const [myProfile, setMyProfile] = useState<FactionPlayerProfile | null>(null);
+    const [myProfile, setMyProfile] = useState<FactionPlayerProfile | null>(session?.myProfile || null);
     const [chatMessages, setChatMessages] = useState<FactionChatMessage[]>([]);
-    const [isAdmin, setIsAdmin] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(session?.isAdmin || false);
     const [currentMapId, setCurrentMapId] = useState(initialData.maps[0]?.id || '');
     const [isDataLoaded, setIsDataLoaded] = useState(networkMode !== 'CLIENT');
     const [announcement, setAnnouncement] = useState<{title: string, message: string} | null>(null);
+
+    // -- Session Persistence --
+    useEffect(() => {
+        if (myProfile) {
+            saveFactionSession({ myProfile });
+        }
+    }, [myProfile]);
+
+    useEffect(() => {
+        saveFactionSession({ isAdmin });
+    }, [isAdmin]);
 
     const currentMap = data.maps.find(m => m.id === currentMapId);
 
@@ -211,6 +225,23 @@ export const useFactionData = ({ initialData, network, networkMode }: UseFaction
         }
     };
 
+    const handleDeletePlayer = (targetId: string) => {
+        if (!isAdmin) return;
+        const target = players.find(p => p.id === targetId);
+        if (!target) return;
+
+        if (!window.confirm(`정말로 '${target.name}' 캐릭터를 영구적으로 삭제하시겠습니까?`)) return;
+
+        setPlayers(prev => prev.filter(p => p.id !== targetId));
+        if (myProfile && myProfile.id === targetId) setMyProfile(null);
+
+        if (networkMode === 'HOST') {
+            broadcast({ type: 'SYNC_PLAYERS', players: players.filter(p => p.id !== targetId) });
+        } else {
+            sendToHost({ type: 'DELETE_PLAYER', targetId });
+        }
+    };
+
     return {
         data, setData,
         players, setPlayers,
@@ -232,6 +263,7 @@ export const useFactionData = ({ initialData, network, networkMode }: UseFaction
         handleBlockClick,
         broadcastProfileUpdate,
         updateMapData,
-        advanceGlobalMapTurn
+        advanceGlobalMapTurn,
+        handleDeletePlayer
     };
 };

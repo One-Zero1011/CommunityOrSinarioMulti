@@ -19,7 +19,7 @@ interface MobileFactionUIProps {
   isAdmin: boolean;
   selectedPlayerId: string | null;
   setSelectedPlayerId: (id: string | null) => void;
-  broadcastProfileUpdate: (updates: Partial<FactionPlayerProfile>) => void;
+  broadcastProfileUpdate: (profile: FactionPlayerProfile) => void;
   chatMessages: FactionChatMessage[];
   handleSendMessage: (text: string, channel: 'TEAM' | 'BLOCK') => void;
   selectedAdminPlayer?: FactionPlayerProfile;

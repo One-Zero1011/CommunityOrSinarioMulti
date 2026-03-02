@@ -17,7 +17,7 @@ export const FactionMapCanvas: React.FC<FactionMapCanvasProps> = ({
 }) => {
     
     const getFactionColor = (id: string | undefined) => {
-        if (!id) return null;
+        if (!id) return undefined;
         return factions.find(f => f.id === id)?.color;
     };
 

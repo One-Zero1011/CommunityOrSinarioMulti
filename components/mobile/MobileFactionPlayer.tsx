@@ -12,6 +12,7 @@ import { MobileFactionUI } from './faction/MobileFactionUI';
 import { useFactionData } from '../faction/hooks/useFactionData';
 import { useCombatSystem } from '../faction/hooks/useCombatSystem';
 import { useFactionNetwork } from '../faction/hooks/useFactionNetwork';
+import { getFactionSession } from '../../lib/session-storage';
 
 interface MobileFactionPlayerProps {
   data: FactionGameData;
@@ -35,7 +36,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       currentMap, 
       handlePlayerJoin, handleAdminLogin, handleMapChange, 
       updateAdminPlayer, sendAdminAnnouncement, handleSendMessage, handleBlockClick, 
-      broadcastProfileUpdate, updateMapData, advanceGlobalMapTurn
+      broadcastProfileUpdate, updateMapData, advanceGlobalMapTurn, handleDeletePlayer
   } = useFactionData({ initialData, network, networkMode });
 
   // 2. Combat System Logic
@@ -43,7 +44,8 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
       combatState, setCombatState,
       setAdminCombatViewOpen,
       activeSession, isCombatActiveInRelevantBlock, showCombatUI,
-      toggleCombat, handleCombatAction, handleCombatResponse, resolveTurn, resumeCombatsOnGlobalTurn
+      toggleCombat, handleCombatAction, handleCombatResponse, resolveTurn, resumeCombatsOnGlobalTurn,
+      handleDeleteCharacterFromCombat
   } = useCombatSystem({
       network, players, myProfile, isAdmin, selectedAdminPlayer: players.find(p => p.id === (null as any)), // Temporary placeholder
       broadcastProfileUpdate, updateMapData, data, currentMap
@@ -51,7 +53,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
 
   // UI Local State
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
-  const [isSetupOpen, setIsSetupOpen] = useState(true);
+  const [isSetupOpen, setIsSetupOpen] = useState(!getFactionSession()?.myProfile && !getFactionSession()?.isAdmin);
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
 
@@ -70,6 +72,12 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
   const handleGlobalTurnAdvance = () => {
     advanceGlobalMapTurn();
     resumeCombatsOnGlobalTurn();
+  };
+
+  const handleDeleteCharacter = (targetId: string) => {
+    if (!isAdmin) return;
+    handleDeleteCharacterFromCombat(targetId);
+    handleDeletePlayer(targetId);
   };
 
   const isTurnFinished = myProfile?.lastActionTurn === data.currentTurn;
@@ -104,6 +112,7 @@ export const MobileFactionPlayer: React.FC<MobileFactionPlayerProps> = ({ data: 
           chatMessages={chatMessages}
           onSendMessage={handleSendMessage}
           isAdmin={isAdmin}
+          onDeleteCharacter={handleDeleteCharacter}
           onClose={() => setAdminCombatViewOpen(false)}
         />
       )}

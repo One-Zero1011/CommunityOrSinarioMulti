@@ -190,11 +190,11 @@ export const useCombatSystem = ({
         }
     };
 
-    const resolveTurn = (targetBlockId?: string, extraLogs: CombatLogEntry[] = [], damageUpdates: Record<string, number> = {}) => {
+    const resolveTurn = (targetBlockId?: string, extraLogs: CombatLogEntry[] = [], damageUpdates: Record<string, number> = {}, sessionOverride?: CombatSession) => {
         const blockId = targetBlockId || (isAdmin ? selectedAdminPlayer?.currentBlockId : myProfile?.currentBlockId);
         if (!blockId) return;
   
-        const session = combatState[blockId];
+        const session = sessionOverride || combatState[blockId];
         if (!session || !session.isActive) return;
   
         const { turnOrder } = session;
@@ -269,6 +269,9 @@ export const useCombatSystem = ({
         if (!blockId) return;
         const session = combatState[blockId];
         if (!session) return;
+
+        // Guard: Fled players cannot take actions
+        if (session.fledPlayerIds.includes(myProfile.id)) return;
   
         const target = players.find(p => p.id === targetId);
   
@@ -300,8 +303,9 @@ export const useCombatSystem = ({
                 const log: CombatLogEntry = { id: generateId(), timestamp: Date.now(), text: `💨 [${myProfile.name}] 도주 성공!`, type: 'FLEE' };
                 const newFled = [...session.fledPlayerIds, myProfile.id];
                 const updatedSession = { ...session, fledPlayerIds: newFled };
-                setCombatState(prev => ({ ...prev, [blockId]: updatedSession }));
-                resolveTurn(blockId, [log]);
+                // We sync the state but also pass updatedSession to resolveTurn to avoid stale state issues
+                syncCombatState({ ...combatState, [blockId]: updatedSession });
+                resolveTurn(blockId, [log], {}, updatedSession);
             } else { 
                 resolveTurn(blockId, [{ id: generateId(), timestamp: Date.now(), text: `🚫 [${myProfile.name}] 도주 실패!`, type: 'FLEE' }]);
             }
@@ -313,6 +317,9 @@ export const useCombatSystem = ({
         const blockId = myProfile.currentBlockId;
         const session = combatState[blockId];
         if (!session || !session.pendingAction) return;
+
+        // Guard: Fled players cannot respond
+        if (session.fledPlayerIds.includes(myProfile.id)) return;
   
         const pending = session.pendingAction;
         const attacker = players.find(p => p.id === pending.sourceId);
@@ -400,6 +407,63 @@ export const useCombatSystem = ({
         if (combatUpdated) syncCombatState(newCombatState);
     };
 
+    const handleDeleteCharacterFromCombat = (targetId: string) => {
+        if (!isAdmin) return;
+        
+        const blockId = isAdmin && selectedAdminPlayer ? selectedAdminPlayer.currentBlockId : myProfile?.currentBlockId;
+        if (!blockId) return;
+        
+        const session = combatState[blockId];
+        if (!session || !session.isActive) return;
+
+        const target = players.find(p => p.id === targetId);
+        const newTurnOrder = session.turnOrder.filter(id => id !== targetId);
+        const newFledIds = session.fledPlayerIds.filter(id => id !== targetId);
+        
+        let nextTurnPlayerId = session.currentTurnPlayerId;
+        let extraLogs: CombatLogEntry[] = [{ 
+            id: generateId(), 
+            timestamp: Date.now(), 
+            text: `🚫 [운영자] ${target?.name || '캐릭터'}가 전장에서 이탈(삭제)되었습니다.`, 
+            type: 'SYSTEM' 
+        }];
+
+        // If the deleted player was the current turn holder, advance the turn
+        if (session.currentTurnPlayerId === targetId) {
+            const currentIdx = session.turnOrder.indexOf(targetId);
+            let nextIdx = currentIdx;
+            let found = false;
+            let loops = 0;
+            
+            while (!found && loops < newTurnOrder.length) {
+                nextIdx = nextIdx % newTurnOrder.length;
+                const pid = newTurnOrder[nextIdx];
+                const p = players.find(pl => pl.id === pid);
+                if (p && p.hp > 0 && p.currentBlockId === blockId && !newFledIds.includes(p.id)) {
+                    nextTurnPlayerId = pid;
+                    found = true;
+                }
+                nextIdx++;
+                loops++;
+            }
+            
+            if (!found) nextTurnPlayerId = null;
+        }
+
+        const updatedSession: CombatSession = {
+            ...session,
+            turnOrder: newTurnOrder,
+            fledPlayerIds: newFledIds,
+            currentTurnPlayerId: nextTurnPlayerId,
+            logs: [...session.logs, ...extraLogs]
+        };
+
+        syncCombatState({ ...combatState, [blockId]: updatedSession });
+        
+        // Check if combat should end (e.g. only one faction left)
+        checkCombatVictory(blockId, updatedSession);
+    };
+
     return {
         combatState, setCombatState,
         adminCombatViewOpen, setAdminCombatViewOpen,
@@ -410,6 +474,7 @@ export const useCombatSystem = ({
         handleCombatAction,
         handleCombatResponse,
         resolveTurn,
-        resumeCombatsOnGlobalTurn
+        resumeCombatsOnGlobalTurn,
+        handleDeleteCharacterFromCombat
     };
 };

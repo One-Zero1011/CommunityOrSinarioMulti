@@ -11,11 +11,12 @@ interface FactionCombatUIProps {
     chatMessages: FactionChatMessage[];
     onSendMessage: (text: string, channel: 'TEAM' | 'BLOCK') => void;
     isAdmin?: boolean;
+    onDeleteCharacter?: (id: string) => void;
     onClose?: () => void;
 }
 
 export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({ 
-    myProfile, players, combatSession, onAction, onResponse, chatMessages, onSendMessage, isAdmin, onClose
+    myProfile, players, combatSession, onAction, onResponse, chatMessages, onSendMessage, isAdmin, onDeleteCharacter, onClose
 }) => {
     const [actionStep, setActionStep] = useState<'SELECT_ACTION' | 'SELECT_TARGET'>('SELECT_ACTION');
     const [selectedActionType, setSelectedActionType] = useState<'ATTACK' | 'HEAL' | null>(null);
@@ -32,7 +33,7 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
     // Derived State
     const activePlayerId = combatSession.currentTurnPlayerId;
     const activePlayer = players.find(p => p.id === activePlayerId);
-    const isMyTurn = myProfile && activePlayerId === myProfile.id;
+    const isMyTurn = myProfile && activePlayerId === myProfile.id && !combatSession.fledPlayerIds.includes(myProfile.id);
     const isRoundPaused = combatSession.isActive && !activePlayerId; // New: Check if round is paused
     
     // Split Players
@@ -149,6 +150,20 @@ export const FactionCombatUI: React.FC<FactionCombatUIProps> = ({
                 {isTargeted && <div className="absolute -top-3 bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full z-20 shadow-sm flex items-center gap-1"><Target size={10}/> TARGET</div>}
                 {isFled && <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-xl z-20"><span className="text-gray-400 font-bold text-xs">도주함</span></div>}
                 {isDead && <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-xl z-20"><Skull className="text-gray-500" size={24}/></div>}
+
+                {/* Admin Delete Button */}
+                {isAdmin && onDeleteCharacter && (
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteCharacter(player.id);
+                        }}
+                        className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-500 text-white p-1 rounded-full z-30 shadow-lg border border-red-400 transition-transform hover:scale-110 active:scale-90"
+                        title="캐릭터 삭제"
+                    >
+                        <XCircle size={14} />
+                    </button>
+                )}
 
                 {/* Avatar */}
                 <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full overflow-hidden bg-gray-800 border-2 shadow-lg mb-2 relative ${isEnemy ? 'border-red-400/50' : 'border-blue-400/50'}`}>

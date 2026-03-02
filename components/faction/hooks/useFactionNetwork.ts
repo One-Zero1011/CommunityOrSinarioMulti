@@ -31,6 +31,16 @@ export const useFactionNetwork = ({
     
     const { connections, hostConnection } = network;
 
+    // CLIENT: Auto-rejoin on connection
+    const hasJoinedRef = React.useRef<string | null>(null);
+    useEffect(() => {
+        if (networkMode === 'CLIENT' && hostConnection && myProfile && hasJoinedRef.current !== hostConnection.peer) {
+            hostConnection.send({ type: 'JOIN_FACTION_GAME', profile: myProfile });
+            hasJoinedRef.current = hostConnection.peer;
+        }
+        if (!hostConnection) hasJoinedRef.current = null;
+    }, [networkMode, hostConnection, myProfile]);
+
     // HOST: Broadcast Sync Loop
     useEffect(() => {
         if (networkMode === 'HOST') {
