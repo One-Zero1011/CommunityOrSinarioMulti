@@ -217,4 +217,5 @@ export type NetworkAction =
 | { type: 'SYNC_FACTION_MAP_DATA'; maps: FactionMap[] } 
 | { type: 'REQUEST_FACTION_CHAT'; message: FactionChatMessage } 
 | { type: 'SYNC_FACTION_CHAT'; messages: FactionChatMessage[] } 
-| { type: 'ADMIN_ANNOUNCEMENT'; targetId: string | null; title: string; message: string };
+| { type: 'ADMIN_ANNOUNCEMENT'; targetId: string | null; title: string; message: string }
+| { type: 'DELETE_PLAYER'; targetId: string };

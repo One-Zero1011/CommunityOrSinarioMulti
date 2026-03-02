@@ -15,6 +15,7 @@ import { GameData, FactionGameData, CombatGameData } from './types';
 import { loadGameDataFromFile, loadFactionDataFromFile, loadCombatDataFromFile } from './lib/file-storage';
 import { useNetwork } from './hooks/useNetwork';
 import { useIsMobile } from './hooks/useIsMobile';
+import { getFactionSession, clearFactionSession, saveFactionSession } from './lib/session-storage';
 
 type AppMode = 'HOME' | 'EDITOR' | 'PLAYER' | 'FACTION_EDITOR' | 'FACTION_PLAYER' | 'COMBAT_EDITOR' | 'COMBAT_PLAYER';
 
@@ -30,6 +31,22 @@ function App() {
   
   // Mobile Detection
   const isMobile = useIsMobile();
+
+  // -- Session Restoration --
+  React.useEffect(() => {
+    const session = getFactionSession();
+    if (session && session.networkMode !== 'SOLO') {
+        if (session.factionData) setFactionData(session.factionData);
+        
+        if (session.networkMode === 'HOST') {
+            network.startHost();
+            setMode('FACTION_PLAYER');
+        } else if (session.networkMode === 'CLIENT' && session.hostId) {
+            network.joinGame(session.hostId);
+            setMode('FACTION_PLAYER');
+        }
+    }
+  }, []);
 
   const handleDataLoad = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -52,6 +69,7 @@ function App() {
           try {
               const data = await loadFactionDataFromFile(file);
               setFactionData(data);
+              saveFactionSession({ factionData: data, networkMode: 'HOST' });
               setMode('FACTION_PLAYER');
           } catch (err) {
               console.error(err);
@@ -76,6 +94,7 @@ function App() {
 
   const handleStartHost = () => {
     network.startHost();
+    saveFactionSession({ networkMode: 'HOST' });
     setMode('PLAYER');
   };
 
@@ -86,6 +105,7 @@ function App() {
 
   const handleJoinFactionGame = (hostId: string) => {
     network.joinGame(hostId);
+    saveFactionSession({ hostId, networkMode: 'CLIENT' });
     setMode('FACTION_PLAYER');
   };
 
@@ -161,6 +181,7 @@ function App() {
               network={network}
               onExit={() => {
                   network.disconnect();
+                  clearFactionSession();
                   setMode('HOME');
               }}
             />
@@ -170,6 +191,7 @@ function App() {
                 network={network}
                 onExit={() => {
                     network.disconnect();
+                    clearFactionSession();
                     setMode('HOME');
                 }}
             />
